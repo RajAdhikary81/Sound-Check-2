@@ -27,7 +27,7 @@ async def pause_cmd(client, message: Message):
 async def resume_cmd(client, message: Message):
     await react(client, message, "▶️")
     try:
-      await calls.resume_stream(message.chat.id)
+        await calls.resume_stream(message.chat.id)
         await message.reply_text("▶️ <b>গান আবার চালু হলো।</b>")
     except Exception as e:
         LOGGER.error(e)
@@ -49,7 +49,7 @@ async def skip_cmd(client, message: Message):
 @app.on_message(filters.command(["stop", "end"]) & filters.group)
 async def stop_cmd(client, message: Message):
     await react(client, message, "🛑")
-      try:
+    try:
         await calls.leave_call(message.chat.id)
         ACTIVE_CHATS.pop(message.chat.id, None)
         await message.reply_text("🛑 <b>স্ট্রিম বন্ধ করা হলো।</b>\n\nধন্যবাদ গান উপভোগ করার জন্য 💝")
