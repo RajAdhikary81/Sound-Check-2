@@ -1,71 +1,107 @@
-# 🎵 MusicBangla — Telegram Multi-Functional Bot
+# 🎵 MusicBangla — Multi-Functional Telegram Music Bot
 
-MusicBangla হলো একটি শক্তিশালী, দ্রুত এবং ফিচার-সমৃদ্ধ টেলিগ্রাম বট। এটি কোনো থার্ড-পার্টি API বা প্রক্সি ছাড়াই সরাসরি **yt-dlp** এর মাধ্যমে টেলিগ্রাম গ্রুপ ভয়েস চ্যাটে (VC) নিখুঁতভাবে গান এবং ভিডিও প্লে করতে পারে। এর পাশাপাশি গ্রুপকে চাঙ্গা রাখতে এতে যুক্ত করা হয়েছে **মজার মজার গেম** এবং **ইউজার মেনশন/ট্যাগিং** করার মতো দুর্দান্ত সব ফিচার!
+[**বাংলা সংস্করণ নিচে দেওয়া হয়েছে (Bengali version is below)**](#-বাংলা-সংস্করণ)
 
----
-
-## ✨ আকর্ষণীয় বৈশিষ্ট্যসমূহ (Features)
-
-* 🎵 **অডিও এবং ভিডিও স্ট্রিমিং:** গ্রুপ ভয়েস চ্যাটে হাই-কোয়ালিটি অডিও এবং ভিডিও প্লেব্যাক সাপোর্ট।
-* 🎮 **ইন-লাইন গেমস:** বটের মাধ্যমেই সরাসরি গ্রুপে মজার মজার গেম খেলার সুবিধা।
-* 📣 **নাম মেনশন ও ট্যাগিং:** গ্রুপের মেম্বারদের সহজে মেনশন বা অল-ট্যাগ করার স্মার্ট সিস্টেম।
-* 🚀 **সুপারফাস্ট ডাউনলোড:** সমান্তরাল ডাউনলোড এবং ভয়েস চ্যাট হ্যান্ডলিং সিস্টেম।
-* 🛡️ **ইউটিউব বাইপাস মেকানিজম:** ইউটিউব বট-ডিটেকশন এবং আইপি ব্লকিং এড়ানোর জন্য কুকিজ ও মোবাইল ক্লায়েন্ট সাপোর্ট।
-* 📊 **কোনো API Key ছাড়াই সার্চ:** সরাসরি নাম লিখে গান খোঁজার সুবিধা।
+MusicBangla is a powerful, fast, and feature-rich Telegram bot designed to stream high-quality audio and video directly into group Voice Chats (VC) using **yt-dlp**. It bypasses YouTube's strict bot-detection mechanisms and also features interactive in-line games and smart user mention/tagging systems to keep your community active!
 
 ---
 
-## 🛠️ প্রয়োজনীয় কনফিগারেশন (Config Vars)
+## ✨ Features
 
-বটটি সঠিকভাবে রান করার জন্য আপনার Heroku বা VPS-এর পরিবেশগত ভেরিয়েবলগুলোতে (Environment Variables) নিচের মানগুলো সেট করতে হবে:
+* 🎵 **Audio & Video Streaming:** Supports high-quality audio and video playback in Telegram Voice Chats.
+* 🎮 **In-line Games:** Play fun text-based and interactive games directly within the group.
+* 📣 **Mass Mention / TagAll:** Smart tool to tag or mention group members easily.
+* 🚀 **Superfast Downloads:** Parallel downloading and efficient voice chat streaming handling.
+* 🛡️ **YouTube Bypass:** Advanced custom user-agents and Netscape cookies support to avoid YouTube bot-detection and IP blocking.
+* 📊 **API-Less Search:** No external YouTube Data API key or proxy required; search directly by name.
+
+---
+
+## 🛠️ Required Configuration (Config Vars)
+
+Configure these environment variables in your Heroku or VPS dashboard:
 
 | Key | Description | Example |
 | :--- | :--- | :--- |
-| `API_ID` | আপনার Telegram API ID (my.telegram.org থেকে প্রাপ্ত) | `1234567` |
-| `API_HASH` | আপনার Telegram API Hash | `abcdef1234567890abcdef...` |
-| `BOT_TOKEN` | BotFather থেকে প্রাপ্ত টেলিগ্রাম বটের টোকেন | `123456:ABC-DEF1234ghIkl-zyx` |
-| `STRING_SESSION` | অ্যাসিস্ট্যান্ট অ্যাকাউন্টের Pyrogram String Session | `BQAzA...` |
-| `OWNER_USERNAME` | বটের মালিকের টেলিগ্রাম ইউজারনেম (অ্যাট `@` ছাড়া) | `RajSukh81` |
-| `LOG_GROUP_ID` | বটের লগ বা স্টার্টআপ মেসেজ পাঠানোর গ্রুপ আইডি (অবশ্যই শুরুতে `-100` থাকতে হবে) | `-1003935489315` |
-| `YT_COOKIES` | *(ঐচ্ছিক)* ইউটিউবের ব্লকিং এড়ানোর জন্য Netscape ফরম্যাটের কুকিজ টেক্সট | `### Netscape HTTP Cookie File...` |
+| `API_ID` | Your Telegram API ID (from my.telegram.org) | `1234567` |
+| `API_HASH` | Your Telegram API Hash | `abcdef1234567890abcdef...` |
+| `BOT_TOKEN` | Telegram Bot Token from @BotFather | `123456:ABC-DEF1234ghIkl-zyx` |
+| `STRING_SESSION` | Pyrogram String Session of the Assistant Account | `BQAzA...` |
+| `OWNER_USERNAME` | Username of the owner (without `@`) | `RajSukh81` |
+| `LOG_GROUP_ID` | Bot Log Group ID (Must start with `-100`) | `-1003935489315` |
+| `YT_COOKIES` | *(Optional)* Netscape format cookies text to bypass YouTube bot blocks | `### Netscape HTTP Cookie File...` |
 
 ---
 
-## 🚀 ডেপ্লয় করার নিয়ম (Deployment)
+## 🚀 Deployment Guide
 
-### হেরোকু (Heroku)-তে ডেপ্লয় করার সহজ ধাপ:
+### Deploying on Heroku:
 
-1. **GitHub রিপোজিটরি লিংক করুন:** আপনার Heroku অ্যাপের 'Deploy' ট্যাবে যান এবং আপনার `RajSukh81/MusicBangla` রিপোজিটরির সাথে কানেক্ট করুন।
-2. **Config Vars সেট করুন:** 'Settings' ট্যাবে গিয়ে **Reveal Config Vars**-এ চাপুন এবং উপরের টেবিলে দেওয়া প্রয়োজনীয় সকল Key এবং Value যুক্ত করুন।
-3. **Buildpacks যুক্ত করুন:** আপনার অ্যাপের 'Settings' ট্যাবের Buildpacks সেকশনে নিচের বিল্ডপ্যাকগুলো অবশ্যই থাকতে হবে:
+1. **Connect Repository:** Go to your Heroku App -> 'Deploy' tab and connect your `RajSukh81/MusicBangla` repository.
+2. **Setup Config Vars:** Go to 'Settings' -> Click **Reveal Config Vars** and add the keys and values from the table above.
+3. **Add Buildpacks:** In the 'Settings' tab, ensure you have added these buildpacks:
    * `heroku/python`
-   * `heroku/nodejs` (py-tgcalls সঠিকভাবে কাজ করার জন্য প্রয়োজনীয়)
-4. **Deploy Branch:** এবার 'Deploy' ট্যাবে ফিরে গিয়ে নিচে নেমে **Deploy Branch** বাটনে ক্লিক করুন। 
-5. **Dynos অন করুন:** ডেপ্লয় শেষ হলে 'Resources' ট্যাবে গিয়ে `worker: python3 -m MusicBangla` ডাইনোটি চালু (Turn on) করে দিন।
+   * `heroku/nodejs` (Required for py-tgcalls)
+4. **Deploy Branch:** Go back to the 'Deploy' tab and click **Deploy Branch**.
+5. **Turn on Dynos:** Once successfully built, go to 'Resources' and enable the `worker: python3 -m MusicBangla` dyno.
 
 ---
 
-## 📜 বটের মূল কমান্ডসমূহ (Commands)
+## 📜 Bot Commands
 
-### 🎵 মিউজিক কমান্ড:
-* `/play <গানের নাম বা লিংক>` — গ্রুপ ভয়েস চ্যাটে অডিও গান বাজানোর জন্য।
-* `/vplay <ভিডিওর নাম বা লিংক>` — গ্রুপ ভয়েস চ্যাটে ভিডিও সহ গান বাজানোর জন্য।
-* `/pause` — গান সাময়িকভাবে থামানোর জন্য।
-* `/resume` — থামানো গান পুনরায় চালু করার জন্য।
-* `/skip` — বর্তমান গানটি বাদ দিয়ে পরবর্তী গানে যাওয়ার জন্য।
-* `/stop` — গান সম্পূর্ণ বন্ধ করে ভয়েস চ্যাট খালি করার জন্য।
+### 🎵 Music Commands:
+* `/play <song name or link>` — Play audio in group Voice Chat.
+* `/vplay <video name or link>` — Play video in group Voice Chat.
+* `/pause` — Pause current playback.
+* `/resume` — Resume paused playback.
+* `/skip` — Skip current track.
+* `/stop` — Stop streaming and clear VC.
 
-### 🎮 গেম এবং অন্যান্য ফিচার:
-* `/game` বা `/games` — গ্রুপে সরাসরি গেম খেলার অপশন চালু করার জন্য।
-* `/mention` বা `/tagall` — গ্রুপের মেম্বারদের একসাথে সুন্দরভাবে ট্যাগ বা মেনশন করার জন্য।
-
----
-
-## ⚠️ গুরুত্বপূর্ণ সতর্কতা (Disclaimer)
-ইউটিউবের কড়া সিকিউরিটি পলিসির কারণে বটের ডেপ্লয়মেন্টে সমস্যা এড়াতে সর্বদা আপনার **Heroku Config Vars**-এ একটি অতিরিক্ত জিমেইল অ্যাকাউন্টের থেকে নেওয়া তাজা `YT_COOKIES` আপডেট রাখুন। বট চালুর পর অবশ্যই আপনার মূল বট এবং অ্যাসিস্ট্যান্ট অ্যাকাউন্টকে টেলিগ্রাম গ্রুপ ও লগ গ্রুপে **Admin (অ্যাডমিন)** পারমিশন প্রদান করবেন।
+### 🎮 Games & Utilities:
+* `/game` or `/games` — Open interactive inline games menu.
+* `/mention` or `/tagall` — Mention all active members of the group.
 
 ---
 
-**💻 ডেভলপার ও ওনার:** * GitHub: [@RajSukh81](https://github.com/RajSukh81)
-* Telegram: [Raj Sukh](https://t.me/R4J_81)
+# 🇧🇩 বাংলা সংস্করণ
+
+MusicBangla হলো একটি শক্তিশালী এবং দ্রুতগতির টেলিগ্রাম মিউজিক বট, যা কোনো থার্ড-পার্টি API বা প্রক্সি ছাড়াই সরাসরি **yt-dlp** এর মাধ্যমে টেলিগ্রাম গ্রুপ ভয়েস চ্যাটে (VC) গান এবং ভিডিও প্লে করতে পারে। এর পাশাপাশি গ্রুপ চ্যাট জমিয়ে রাখতে এতে যুক্ত করা হয়েছে **মজার গেম** এবং **মেম্বারদের ট্যাগ/মেনশন** করার মতো ফিচারসমূহ।
+
+---
+
+## ✨ বৈশিষ্ট্যসমূহ
+
+* 🎵 **অডিও এবং ভিডিও স্ট্রিমিং:** ভয়েস চ্যাটে হাই-কোয়ালিটি মিউজিক এবং ভিডিও প্লেব্যাক সাপোর্ট।
+* 🎮 **ইন-লাইন গেমস:** বটের মাধ্যমেই সরাসরি গ্রুপে বসে গেম খেলার সুবিধা।
+* 📣 **নাম মেনশন ও ট্যাগিং:** গ্রুপের সকল মেম্বারদের একসাথে সুন্দরভাবে ট্যাগ বা মেনশন করার সিস্টেম।
+* 🛡️ **ইউটিউব বাইপাস মেকানিজম:** ইউটিউব বট-ডিটেকশন এবং আইপি ব্লকিং এড়ানোর জন্য বিশেষ কুকিজ ও মোবাইল ক্লায়েন্ট সাপোর্ট।
+
+---
+
+## 🚀 ডেপ্লয় করার নিয়ম (Heroku)
+
+1. **GitHub রিপোজিটরি লিংক করুন:** Heroku অ্যাপের 'Deploy' ট্যাবে গিয়ে আপনার `RajSukh81/MusicBangla` রিপোজিটরি কানেক্ট করুন।
+2. **Config Vars সেট করুন:** 'Settings' ট্যাবে গিয়ে **Reveal Config Vars**-এ প্রয়োজনীয় সকল Key এবং Value (যেমন: API_ID, BOT_TOKEN ইত্যাদি) যুক্ত করুন।
+3. **Buildpacks যুক্ত করুন:** আপনার অ্যাপের 'Settings'-এ নিচের বিল্ডপ্যাকগুলো অবশ্যই থাকতে হবে:
+   * `heroku/python`
+   * `heroku/nodejs`
+4. **Deploy Branch:** এবার 'Deploy' ট্যাবে ফিরে গিয়ে **Deploy Branch** বাটনে ক্লিক করুন। 
+5. **Dynos অন করুন:** ডেপ্লয় শেষ হলে 'Resources' ট্যাবে গিয়ে `worker` ডাইনোটি চালু (Turn on) করে দিন।
+
+---
+
+## 📜 বটের মূল কমান্ডসমূহ
+
+* `/play <গানের নাম>` — গ্রুপ ভয়েস চ্যাটে অডিও গান বাজানোর জন্য।
+* `/vplay <ভিডিওর নাম>` — ভিডিও সহ গান বাজানোর জন্য।
+* `/pause` / `/resume` / `/skip` / `/stop` — মিউজিক কন্ট্রোল করার জন্য।
+* `/game` — গ্রুপে গেম খেলার অপশন চালু করার জন্য।
+* `/mention` — গ্রুপের মেম্বারদের ট্যাগ করার জন্য।
+
+---
+
+## 👨‍💻 Developer & Owner Contact
+
+* **GitHub Profile:** [@RajSukh81](https://github.com/RajSukh81)
+* **Telegram Support:** [Raj Sukh](https://t.me/R4J_81)
 * 
