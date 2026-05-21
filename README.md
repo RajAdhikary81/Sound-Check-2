@@ -1,107 +1,58 @@
-# 🎵 MusicBangla — Multi-Functional Telegram Music Bot
+<p align="center">
+  <img src="https://pic-link-bot.lovable.app/i/telegram-1779340031479-5eab5504.jpg" alt="MusicBangla Banner" width="100%" style="border-radius: 10px; max-height: 400px; object-fit: cover;">
+</p>
 
-[**বাংলা সংস্করণ নিচে দেওয়া হয়েছে (Bengali version is below)**](#-বাংলা-সংস্করণ)
+<h1 align="center">🎵 MusicBangla 🎵</h1>
 
-MusicBangla is a powerful, fast, and feature-rich Telegram bot designed to stream high-quality audio and video directly into group Voice Chats (VC) using **yt-dlp**. It bypasses YouTube's strict bot-detection mechanisms and also features interactive in-line games and smart user mention/tagging systems to keep your community active!
+<p align="center">
+  <a href="https://github.com/RajSukh81/MusicBangla/stargazers"><img src="https://img.shields.io/github/stars/RajSukh81/MusicBangla?style=for-the-badge&color=ff6b6b" alt="Stars"></a>
+  <a href="https://github.com/RajSukh81/MusicBangla/network/members"><img src="https://img.shields.io/github/forks/RajSukh81/MusicBangla?style=for-the-badge&color=4ecdc4" alt="Forks"></a>
+  <a href="https://t.me/R4J_81"><img src="https://img.shields.io/badge/Telegram-Contact%20Me-blue?style=for-the-badge&logo=telegram" alt="Telegram"></a>
+</p>
 
----
-
-## ✨ Features
-
-* 🎵 **Audio & Video Streaming:** Supports high-quality audio and video playback in Telegram Voice Chats.
-* 🎮 **In-line Games:** Play fun text-based and interactive games directly within the group.
-* 📣 **Mass Mention / TagAll:** Smart tool to tag or mention group members easily.
-* 🚀 **Superfast Downloads:** Parallel downloading and efficient voice chat streaming handling.
-* 🛡️ **YouTube Bypass:** Advanced custom user-agents and Netscape cookies support to avoid YouTube bot-detection and IP blocking.
-* 📊 **API-Less Search:** No external YouTube Data API key or proxy required; search directly by name.
-
----
-
-## 🛠️ Required Configuration (Config Vars)
-
-Configure these environment variables in your Heroku or VPS dashboard:
-
-| Key | Description | Example |
-| :--- | :--- | :--- |
-| `API_ID` | Your Telegram API ID (from my.telegram.org) | `1234567` |
-| `API_HASH` | Your Telegram API Hash | `abcdef1234567890abcdef...` |
-| `BOT_TOKEN` | Telegram Bot Token from @BotFather | `123456:ABC-DEF1234ghIkl-zyx` |
-| `STRING_SESSION` | Pyrogram String Session of the Assistant Account | `BQAzA...` |
-| `OWNER_USERNAME` | Username of the owner (without `@`) | `RajSukh81` |
-| `LOG_GROUP_ID` | Bot Log Group ID (Must start with `-100`) | `-1003935489315` |
-| `YT_COOKIES` | *(Optional)* Netscape format cookies text to bypass YouTube bot blocks | `### Netscape HTTP Cookie File...` |
+<p align="center">
+  <b>Welcome to MusicBangla!</b> An advanced, feature-rich multi-functional repository designed for ultimate entertainment, gaming, and high-quality user engagement in 2026.
+  <br />
+  <b>মিউজিকবাংলা-এ আপনাকে স্বাগতম!</b> এটি ২০২৬ সালের একটি অত্যাধুনিক, ফিচার-সমৃদ্ধ মাল্টি-ফাংশনাল রিপোজিটরি যা বিনোদন, গেমিং এবং চমৎকার ইউজার এনগেজমেন্টের জন্য তৈরি করা হয়েছে।
+</p>
 
 ---
 
-## 🚀 Deployment Guide
+## 🌟 Key Features | প্রধান বৈশিষ্ট্যসমূহ
 
-### Deploying on Heroku:
+### 🇧🇩 🌍 Bilingual Support (Bangla & English)
+* Easily interactive in both Bangla and English languages for worldwide usage.
+* বিশ্বব্যাপী সবার ব্যবহারের সুবিধার্থে এটি বাংলা এবং ইংরেজি উভয় ভাষায় ব্যবহার উপযোগী।
 
-1. **Connect Repository:** Go to your Heroku App -> 'Deploy' tab and connect your `RajSukh81/MusicBangla` repository.
-2. **Setup Config Vars:** Go to 'Settings' -> Click **Reveal Config Vars** and add the keys and values from the table above.
-3. **Add Buildpacks:** In the 'Settings' tab, ensure you have added these buildpacks:
-   * `heroku/python`
-   * `heroku/nodejs` (Required for py-tgcalls)
-4. **Deploy Branch:** Go back to the 'Deploy' tab and click **Deploy Branch**.
-5. **Turn on Dynos:** Once successfully built, go to 'Resources' and enable the `worker: python3 -m MusicBangla` dyno.
+### 🎮 Built-in Mini Games | ইন-বিল্ট গেম খেলা
+* Play amazing interactive mini-games directly within the platform.
+* প্ল্যাটফর্মের ভেতরেই দারুণ সব আকর্ষণীয় মিনি-গেম খেলার সুবিধা।
 
----
+### 🗣️ Smart Tagging & Name Mentioning | নাম মেনশন করার সুবিধা
+* Advanced tagging features where you can mention names smoothly.
+* নিখুঁতভাবে নাম মেনশন ও স্মার্ট ট্যাগিং করার বিশেষ সুবিধা।
 
-## 📜 Bot Commands
-
-### 🎵 Music Commands:
-* `/play <song name or link>` — Play audio in group Voice Chat.
-* `/vplay <video name or link>` — Play video in group Voice Chat.
-* `/pause` — Pause current playback.
-* `/resume` — Resume paused playback.
-* `/skip` — Skip current track.
-* `/stop` — Stop streaming and clear VC.
-
-### 🎮 Games & Utilities:
-* `/game` or `/games` — Open interactive inline games menu.
-* `/mention` or `/tagall` — Mention all active members of the group.
+### 🎵 High-Quality Audio Performance | সেরা মিউজিক অভিজ্ঞতা
+* Next-generation audio control and flawless streaming features.
+* নেক্সট-জেনারেশন অডিও কন্ট্রোল এবং নিরবচ্ছিন্ন স্ট্রিমিং অভিজ্ঞতা।
 
 ---
 
-# 🇧🇩 বাংলা সংস্করণ
+## 🛠️ Installation & Usage | ইনস্টলেশন এবং ব্যবহার
 
-MusicBangla হলো একটি শক্তিশালী এবং দ্রুতগতির টেলিগ্রাম মিউজিক বট, যা কোনো থার্ড-পার্টি API বা প্রক্সি ছাড়াই সরাসরি **yt-dlp** এর মাধ্যমে টেলিগ্রাম গ্রুপ ভয়েস চ্যাটে (VC) গান এবং ভিডিও প্লে করতে পারে। এর পাশাপাশি গ্রুপ চ্যাট জমিয়ে রাখতে এতে যুক্ত করা হয়েছে **মজার গেম** এবং **মেম্বারদের ট্যাগ/মেনশন** করার মতো ফিচারসমূহ।
+To setup and run this project, follow these steps:
+এই প্রজেক্টটি সেটআপ এবং রান করতে নিচের ধাপগুলো অনুসরণ করুন:
 
----
+```bash
+# Clone the repository
+git clone [https://github.com/RajSukh81/MusicBangla.git](https://github.com/RajSukh81/MusicBangla.git)
 
-## ✨ বৈশিষ্ট্যসমূহ
+# Navigate to the project directory
+cd MusicBangla
 
-* 🎵 **অডিও এবং ভিডিও স্ট্রিমিং:** ভয়েস চ্যাটে হাই-কোয়ালিটি মিউজিক এবং ভিডিও প্লেব্যাক সাপোর্ট।
-* 🎮 **ইন-লাইন গেমস:** বটের মাধ্যমেই সরাসরি গ্রুপে বসে গেম খেলার সুবিধা।
-* 📣 **নাম মেনশন ও ট্যাগিং:** গ্রুপের সকল মেম্বারদের একসাথে সুন্দরভাবে ট্যাগ বা মেনশন করার সিস্টেম।
-* 🛡️ **ইউটিউব বাইপাস মেকানিজম:** ইউটিউব বট-ডিটেকশন এবং আইপি ব্লকিং এড়ানোর জন্য বিশেষ কুকিজ ও মোবাইল ক্লায়েন্ট সাপোর্ট।
+# Install dependencies (if applicable)
+# npm install   <- For Node.js
+# pip install -r requirements.txt   <- For Python
 
----
-
-## 🚀 ডেপ্লয় করার নিয়ম (Heroku)
-
-1. **GitHub রিপোজিটরি লিংক করুন:** Heroku অ্যাপের 'Deploy' ট্যাবে গিয়ে আপনার `RajSukh81/MusicBangla` রিপোজিটরি কানেক্ট করুন।
-2. **Config Vars সেট করুন:** 'Settings' ট্যাবে গিয়ে **Reveal Config Vars**-এ প্রয়োজনীয় সকল Key এবং Value (যেমন: API_ID, BOT_TOKEN ইত্যাদি) যুক্ত করুন।
-3. **Buildpacks যুক্ত করুন:** আপনার অ্যাপের 'Settings'-এ নিচের বিল্ডপ্যাকগুলো অবশ্যই থাকতে হবে:
-   * `heroku/python`
-   * `heroku/nodejs`
-4. **Deploy Branch:** এবার 'Deploy' ট্যাবে ফিরে গিয়ে **Deploy Branch** বাটনে ক্লিক করুন। 
-5. **Dynos অন করুন:** ডেপ্লয় শেষ হলে 'Resources' ট্যাবে গিয়ে `worker` ডাইনোটি চালু (Turn on) করে দিন।
-
----
-
-## 📜 বটের মূল কমান্ডসমূহ
-
-* `/play <গানের নাম>` — গ্রুপ ভয়েস চ্যাটে অডিও গান বাজানোর জন্য।
-* `/vplay <ভিডিওর নাম>` — ভিডিও সহ গান বাজানোর জন্য।
-* `/pause` / `/resume` / `/skip` / `/stop` — মিউজিক কন্ট্রোল করার জন্য।
-* `/game` — গ্রুপে গেম খেলার অপশন চালু করার জন্য।
-* `/mention` — গ্রুপের মেম্বারদের ট্যাগ করার জন্য।
-
----
-
-## 👨‍💻 Developer & Owner Contact
-
-* **GitHub Profile:** [@RajSukh81](https://github.com/RajSukh81)
-* **Telegram Support:** [Raj Sukh](https://t.me/R4J_81)
-* 
+# Start the application
+# npm start  or  python main.py
