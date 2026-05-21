@@ -1,7 +1,14 @@
+import os
 import asyncio
 from pyrogram import idle
 from MusicBangla import app, assistant, calls, LOGGER
 import config
+
+# Heroku Config Var থেকে cookies লোড করার কোড (ইউটিউব ব্লকিং এড়ানোর জন্য)
+_yt_cookies = os.environ.get("YT_COOKIES")
+if _yt_cookies:
+    with open("cookies.txt", "w") as _f:
+        _f.write(_yt_cookies)
 
 
 async def main():
@@ -58,3 +65,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(main())
+    
