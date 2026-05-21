@@ -9,7 +9,7 @@ import config
 from MusicBangla import app, assistant, calls, LOGGER
 
 
-# Fast & lightweight yt-dlp options
+# Fast & lightweight yt-dlp options (YouTube bot-detection bypass সহ)
 COMMON_OPTS = {
     "quiet": True,
     "no_warnings": True,
@@ -19,8 +19,23 @@ COMMON_OPTS = {
     "default_search": "ytsearch",
     "source_address": "0.0.0.0",
     "concurrent_fragment_downloads": 5,
-    "retries": 3,
+    "retries": 5,
+    "fragment_retries": 5,
+    # YouTube bot-detection bypass (ইউটিউব ব্লকিং এড়ানোর জন্য)
+    "extractor_args": {
+        "youtube": {
+            "player_client": ["tv", "ios", "android_vr", "web"],
+            "player_skip": ["webpage", "configs"],
+        }
+    },
+    "http_headers": {
+        "User-Agent": "com.google.android.youtube/19.09.37 (Linux; U; Android 14) gzip",
+    },
 }
+
+# cookies.txt ফাইল থাকলে সেটি ব্যবহারের ব্যবস্থা (ধাপ ২ এর জন্য)
+if os.path.exists("cookies.txt"):
+    COMMON_OPTS["cookiefile"] = "cookies.txt"
 
 AUDIO_OPTS = {
     **COMMON_OPTS,
@@ -201,3 +216,4 @@ async def play_cmd(client, message: Message):
 @app.on_message(filters.command(["vplay", "vp"]) & filters.group)
 async def vplay_cmd(client, message: Message):
     await _play(client, message, video=True)
+    
