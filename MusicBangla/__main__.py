@@ -22,9 +22,13 @@ async def main():
         LOGGER.error("STRING_SESSION ঠিক করে আবার deploy করুন!")
         return
 
-  # py-tgcalls
-    await calls.start()
-    LOGGER.info("✅ Voice Chat handler চালু")
+    # py-tgcalls
+    try:
+        await calls.start()
+        LOGGER.info("✅ Voice Chat handler চালু")
+    except Exception as e:
+        LOGGER.error(f"❌ Voice Chat handler চালু হলো না: {e}")
+        LOGGER.warning("Node.js ইনস্টল আছে কিনা চেক করুন (Heroku তে nodejs buildpack লাগবে)")
 
     # Plugins লোড
     import MusicBangla.plugins  # noqa
@@ -50,6 +54,7 @@ async def main():
     await app.stop()
     await assistant.stop()
     LOGGER.info("বট বন্ধ হলো।")
+
 
 if __name__ == "__main__":
     asyncio.get_event_loop().run_until_complete(main())
