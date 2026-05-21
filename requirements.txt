@@ -1,0 +1,11 @@
+pyrofork==2.3.21
+py-tgcalls==0.9.7
+tgcrypto
+yt-dlp
+youtube-search-python
+motor
+dnspython
+python-dotenv
+ffmpeg-python
+aiofiles
+aiohttp
