@@ -4,7 +4,7 @@ import yt_dlp
 from pyrogram import filters
 from pyrogram.types import Message
 from pytgcalls.types import MediaStream
-from youtubesearchpython.__future__ import VideosSearch
+from youtubesearchpython import VideosSearch
 
 import config
 from MusicBangla import app, assistant, calls, LOGGER
@@ -52,11 +52,11 @@ os.makedirs("downloads", exist_ok=True)
 ACTIVE_CHATS = {}
 
 
-async def yt_search(query: str):
-    """youtube-search-python দিয়ে সার্চ (Heroku-friendly)"""
+def yt_search_sync(query: str):
+    """youtube-search-python দিয়ে সার্চ (sync — Heroku-friendly)"""
     try:
         search = VideosSearch(query, limit=1)
-        result = await search.next()
+        result = search.result()
 
         if not result or not result.get("result"):
             LOGGER.warning(f"No results for: {query}")
@@ -68,7 +68,7 @@ async def yt_search(query: str):
 
         # duration parse
         dur_text = video.get("duration", "0:00")
-        dur_parts = dur_text.split(":")
+        dur_parts = str(dur_text).split(":")
         try:
             if len(dur_parts) == 3:
                 duration = int(dur_parts[0]) * 3600 + int(dur_parts[1]) * 60 + int(dur_parts[2])
@@ -233,8 +233,12 @@ async def _play(client, message: Message, video: bool):
     try:
         # Step 1: সার্চ (youtube-search-python — async)
         LOGGER.info(f"🔍 Searching: {query}")
+        loop = asyncio.get_event_loop()
         try:
-            info = await asyncio.wait_for(yt_search(query), timeout=15)
+            info = await asyncio.wait_for(
+                loop.run_in_executor(None, yt_search_sync, query),
+                timeout=15,
+            )
         except asyncio.TimeoutError:
             return await status.edit("⏱ সার্চ টাইমআউট। আবার চেষ্টা করুন।")
         except Exception as e:
@@ -257,7 +261,6 @@ async def _play(client, message: Message, video: bool):
         )
 
         # Step 3: Assistant + Download (parallel)
-        loop = asyncio.get_event_loop()
         LOGGER.info(f"💾 Downloading: {info['link']}")
 
         assistant_ok, media_path = await asyncio.gather(
