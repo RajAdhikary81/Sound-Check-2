@@ -1,5 +1,5 @@
 pyrofork==2.3.21
-py-tgcalls==2.3.3
+py-tgcalls==2.2.12
 ntgcalls
 tgcrypto
 yt-dlp
