@@ -13,7 +13,7 @@ logging.getLogger("pytgcalls").setLevel(logging.WARNING)
 
 LOGGER = logging.getLogger("MusicBangla")
 
-# মূল বট
+# à¦®à§‚à¦² à¦¬à¦Ÿ
 app = Client(
     name="MusicBanglaBot",
     api_id=config.API_ID,
@@ -22,7 +22,7 @@ app = Client(
     in_memory=True,
 )
 
-# Assistant userbot (VC join করার জন্য)
+# Assistant userbot (VC join à¦•à¦°à¦¾à¦° à¦œà¦¨à§à¦¯)
 assistant = Client(
     name="MusicBanglaAssistant",
     api_id=config.API_ID,
