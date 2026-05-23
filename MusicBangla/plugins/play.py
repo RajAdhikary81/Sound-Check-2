@@ -1,5 +1,6 @@
 import os
 import asyncio
+import shutil
 import yt_dlp
 from pyrogram import filters
 from pyrogram.types import Message
@@ -9,7 +10,7 @@ from youtubesearchpython import VideosSearch
 import config
 from MusicBangla import app, assistant, calls, LOGGER
 
-# yt-dlp অপশন্স (শুধু ডাউনলোডের জন্য, সার্চ নয়)
+# yt-dlp common options
 COMMON_OPTS = {
     "quiet": True,
     "no_warnings": True,
@@ -17,41 +18,53 @@ COMMON_OPTS = {
     "nocheckcertificate": True,
     "noplaylist": True,
     "source_address": "0.0.0.0",
-    "concurrent_fragment_downloads": 10,
     "retries": 5,
     "fragment_retries": 5,
     "socket_timeout": 30,
+    "prefer_free_formats": True,
     "http_headers": {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    },
-    "extractor_args": {
-        "youtube": {
-            "player_client": ["ios", "web_creator", "mweb"],
-        },
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/131.0.0.0 Safari/537.36"
+        ),
     },
 }
 
+# Node.js আছে কিনা দেখো — yt-dlp EJS signature solving-এর জন্য
+if shutil.which("node"):
+    COMMON_OPTS["js_runtimes"] = "nodejs"
+    LOGGER.info("✅ Node.js found — yt-dlp will use it for EJS")
+
+# cookies থাকলে যোগ করো
 if os.path.exists("cookies.txt"):
     COMMON_OPTS["cookiefile"] = "cookies.txt"
+    LOGGER.info("✅ cookies.txt loaded for yt-dlp")
 
-AUDIO_OPTS = {
+# URL extraction options (ডাউনলোড ছাড়া সরাসরি stream URL)
+AUDIO_URL_OPTS = {
     **COMMON_OPTS,
-    "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio*/best",
-    "outtmpl": "downloads/%(id)s.%(ext)s",
-    "postprocessors": [
-        {
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "m4a",
-            "preferredquality": "128",
-        }
-    ],
+    "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
 }
 
-VIDEO_OPTS = {
+VIDEO_URL_OPTS = {
     **COMMON_OPTS,
-    "format": "best[height<=480][ext=mp4]/best[ext=mp4]/bestvideo[height<=480]+bestaudio/bestvideo+bestaudio/best",
+    "format": "best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best",
+}
+
+# Download options (fallback)
+AUDIO_DL_OPTS = {
+    **COMMON_OPTS,
+    "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+    "outtmpl": "downloads/%(id)s.%(ext)s",
+    "concurrent_fragment_downloads": 10,
+}
+
+VIDEO_DL_OPTS = {
+    **COMMON_OPTS,
+    "format": "best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best",
     "outtmpl": "downloads/%(id)s_v.%(ext)s",
-    "merge_output_format": "mp4",
+    "concurrent_fragment_downloads": 10,
 }
 
 os.makedirs("downloads", exist_ok=True)
@@ -107,40 +120,80 @@ def yt_search_sync(query: str):
         return None
 
 
-def download_media(url: str, video: bool):
-    """মিডিয়া ডাউনলোড করে"""
+def get_stream_url(url: str, video: bool):
+    """yt-dlp দিয়ে direct stream URL বের করো (ডাউনলোড ছাড়া)"""
+    opts = VIDEO_URL_OPTS if video else AUDIO_URL_OPTS
     try:
-        opts = VIDEO_OPTS if video else AUDIO_OPTS
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            stream_url = info.get("url")
+            if stream_url:
+                LOGGER.info(f"✅ Got stream URL for: {info.get('title', 'unknown')}")
+                return stream_url
+            # কিছু format-এ url সরাসরি থাকে না, requested_formats দেখো
+            formats = info.get("requested_formats")
+            if formats:
+                # audio format-এর url নাও
+                for f in formats:
+                    if not video and f.get("acodec") != "none":
+                        return f.get("url")
+                    if video:
+                        return f.get("url")
+            return None
+    except Exception as e:
+        LOGGER.warning(f"Stream URL extraction failed: {e}")
+        return None
+
+
+def download_media(url: str, video: bool):
+    """মিডিয়া ডাউনলোড করে (fallback)"""
+    try:
+        opts = VIDEO_DL_OPTS if video else AUDIO_DL_OPTS
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             fname = ydl.prepare_filename(info)
 
-            # audio post-process হলে extension বদলে যায়
+            # extension বদলে যেতে পারে
+            base = os.path.splitext(fname)[0]
             if not video:
-                base = os.path.splitext(fname)[0]
                 for ext in [".m4a", ".webm", ".opus", ".mp3", ".ogg", ".wav"]:
                     if os.path.exists(base + ext):
                         return base + ext
-            # video merge হলে .mp4 হতে পারে
             else:
-                base = os.path.splitext(fname)[0]
                 for ext in [".mp4", ".mkv", ".webm"]:
                     if os.path.exists(base + ext):
                         return base + ext
+
             if os.path.exists(fname):
                 return fname
-            # fallback: downloads ফোল্ডারে id দিয়ে খুঁজি
+
+            # fallback: id দিয়ে খোঁজো
             vid_id = info.get("id", "")
             if vid_id:
                 prefix = f"downloads/{vid_id}"
+                suffix = "_v" if video else ""
                 for ext in [".m4a", ".mp4", ".webm", ".opus", ".mp3", ".mkv", ".ogg"]:
-                    candidate = prefix + ("_v" if video else "") + ext
+                    candidate = prefix + suffix + ext
                     if os.path.exists(candidate):
                         return candidate
-            raise Exception("ডাউনলোড সম্পন্ন কিন্তু ফাইল খুঁজে পাওয়া যায়নি")
+
+            raise Exception("ফাইল পাওয়া যায়নি")
     except Exception as e:
         LOGGER.error(f"Download error: {e}")
         raise Exception(f"ডাউনলোড ব্যর্থ: {str(e)[:150]}")
+
+
+def get_media(url: str, video: bool):
+    """প্রথমে stream URL চেষ্টা করো, ব্যর্থ হলে download করো"""
+    # পদ্ধতি ১: Direct stream URL (দ্রুত, ডাউনলোড লাগে না)
+    stream_url = get_stream_url(url, video)
+    if stream_url:
+        LOGGER.info("🎯 Using direct stream URL (no download)")
+        return stream_url
+
+    # পদ্ধতি ২: Download fallback
+    LOGGER.info("📥 Stream URL failed, falling back to download...")
+    return download_media(url, video)
 
 
 def fmt_dur(s):
@@ -276,18 +329,18 @@ async def _play(client, message: Message, video: bool):
         # Step 2: Status
         icon = "🎬" if video else "🎵"
         await status.edit(
-            f"📥 **ডাউনলোড হচ্ছে...**\n\n"
+            f"📥 **মিডিয়া লোড হচ্ছে...**\n\n"
             f"{icon} `{info['title'][:50]}`\n"
             f"⏱ `{fmt_dur(info['duration'])}`\n\n"
             f"⏳ অপেক্ষা করুন..."
         )
 
-        # Step 3: Assistant + Download (parallel)
-        LOGGER.info(f"💾 Downloading: {info['link']}")
+        # Step 3: Assistant + Media (parallel)
+        LOGGER.info(f"🎵 Getting media: {info['link']}")
 
         assistant_ok, media_path = await asyncio.gather(
             ensure_assistant(message.chat.id),
-            loop.run_in_executor(None, download_media, info["link"], video),
+            loop.run_in_executor(None, get_media, info["link"], video),
             return_exceptions=True,
         )
 
@@ -300,13 +353,14 @@ async def _play(client, message: Message, video: bool):
             )
 
         if isinstance(media_path, Exception):
-            LOGGER.error(f"Download error: {media_path}")
+            LOGGER.error(f"Media error: {media_path}")
             return await status.edit(
-                f"❌ **ডাউনলোড ব্যর্থ!**\n`{str(media_path)[:100]}`\n\nআবার চেষ্টা করুন।"
+                f"❌ **ডাউনলোড ব্যর্থ!**\n`{str(media_path)[:100]}`\n\n"
+                f"🔧 আবার চেষ্টা করুন বা অন্য গান দিন।"
             )
 
-        if not media_path or not os.path.exists(str(media_path)):
-            return await status.edit("❌ মিডিয়া ফাইল পাওয়া যায়নি।")
+        if not media_path:
+            return await status.edit("❌ মিডিয়া পাওয়া যায়নি। অন্য গান দিয়ে চেষ্টা করুন।")
 
         LOGGER.info(f"✅ Downloaded: {media_path}")
 
