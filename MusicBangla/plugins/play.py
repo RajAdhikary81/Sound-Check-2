@@ -20,19 +20,20 @@ if _COOKIE_FILE:
 
 
 def _make_opts(fmt: str, download: bool = False, outtmpl: str = None):
-    """yt-dlp options তৈরি করে — /debug-এ যেভাবে কাজ করেছে ঠিক সেভাবে"""
+    """yt-dlp options তৈরি করে — robust format selection সহ"""
     opts = {
         "quiet": True,
         "no_warnings": True,
         "extractor_args": {
             "youtube": {
-                "player_client": ["android_vr"],
+                "player_client": ["ios", "android", "web"],
             },
         },
         "format": fmt,
         "noplaylist": True,
         "socket_timeout": 30,
-        "retries": 3,
+        "retries": 5,
+        "fragment_retries": 5,
     }
     if _COOKIE_FILE:
         opts["cookiefile"] = _COOKIE_FILE
@@ -104,9 +105,26 @@ def yt_search_sync(query: str):
         return None
 
 
+def _audio_fmt():
+    """Audio format string — multiple fallbacks"""
+    return "140/251/250/249/bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best"
+
+
+def _video_fmt():
+    """Video format string — multiple fallbacks, max 720p for Heroku"""
+    return (
+        "18/"
+        "22/"
+        "best[ext=mp4][height<=720]/"
+        "best[height<=720]/"
+        "best[ext=mp4]/"
+        "best"
+    )
+
+
 def get_stream_url(url: str, video: bool):
     """yt-dlp দিয়ে direct stream URL বের করো (ডাউনলোড ছাড়া)"""
-    fmt = "18/best" if video else "140/bestaudio/best"
+    fmt = _video_fmt() if video else _audio_fmt()
     opts = _make_opts(fmt)
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -120,18 +138,21 @@ def get_stream_url(url: str, video: bool):
             if formats:
                 for f in formats:
                     if not video and f.get("acodec") != "none":
+                        LOGGER.info(f"✅ Got audio from merged: {f.get('format', '?')}")
                         return f.get("url")
                     if video:
+                        LOGGER.info(f"✅ Got video from merged: {f.get('format', '?')}")
                         return f.get("url")
+            LOGGER.warning(f"No stream URL found in info for {url}")
             return None
     except Exception as e:
-        LOGGER.warning(f"Stream URL failed: {e}")
+        LOGGER.warning(f"Stream URL failed for {url}: {e}")
         return None
 
 
 def download_media(url: str, video: bool):
     """মিডিয়া ডাউনলোড করে (fallback)"""
-    fmt = "18/best" if video else "140/bestaudio/best"
+    fmt = _video_fmt() if video else _audio_fmt()
     suffix = "_v" if video else ""
     outtmpl = f"downloads/%(id)s{suffix}.%(ext)s"
     opts = _make_opts(fmt, download=True, outtmpl=outtmpl)
