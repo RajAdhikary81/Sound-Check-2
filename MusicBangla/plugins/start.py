@@ -138,32 +138,31 @@ async def help_cmd(client, message: Message):
         LOGGER.error(f"Help command error: {e}")
 
 
-# 🔴 CALLBACK HANDLERS - এটাই ছিল যা মিসিং!
-@app.on_callback_query(filters.regex("games_menu"))
+# 🔴 CALLBACK HANDLERS
+@app.on_callback_query(filters.regex("^games_menu$"))
 async def games_menu_cb(client, query: CallbackQuery):
+    # games.py-এর handler-কে handle করতে দাও
+    # এখানে শুধু text fallback — games.py-তে inline buttons আছে
     try:
+        from MusicBangla.plugins.games import games_menu_kb
         text = (
             "🎮 <b>গেম মেনু</b>\n\n"
-            "▫️ <code>/ttt</code> — Tic-Tac-Toe (2 player)\n"
-            "▫️ <code>/truth</code> — Random truth question\n"
-            "▫️ <code>/dare</code> — Random dare challenge\n"
-            "▫️ <code>/td</code> — Random truth or dare\n"
+            "নিচের যেকোনো গেম বেছে নাও অথবা কমান্ড দিয়ে চালাও:\n\n"
+            "▫️ <code>/ttt</code> — Tic-Tac-Toe\n"
+            "▫️ <code>/truth</code> | <code>/dare</code> | <code>/td</code>\n"
             "▫️ <code>/rps</code> — Rock Paper Scissors\n"
-            "▫️ <code>/quiz</code> — Bengali quiz\n"
-            "▫️ <code>/8ball <প্রশ্ন></code> — Magic 8-Ball\n"
+            "▫️ <code>/quiz</code> — কুইজ\n"
+            "▫️ <code>/8ball &lt;প্রশ্ন&gt;</code>\n"
             "▫️ <code>/flip</code> — Coin flip\n"
-            "▫️ <code>/dice</code> — Roll a dice\n\n"
-            "কমান্ড লিখে গেম খেলো!"
+            "▫️ <code>/dice</code> — Dice roll"
         )
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("← ফিরে যাও", callback_data="start_menu")]
-        ]))
+        await query.edit_message_text(text, reply_markup=games_menu_kb())
     except Exception as e:
         LOGGER.error(f"Games menu error: {e}")
         await query.answer("❌ সমস্যা হয়েছে!", show_alert=True)
 
 
-@app.on_callback_query(filters.regex("help_menu"))
+@app.on_callback_query(filters.regex("^help_menu$"))
 async def help_menu_cb(client, query: CallbackQuery):
     try:
         text = (
@@ -190,7 +189,7 @@ async def help_menu_cb(client, query: CallbackQuery):
         await query.answer("❌ সমস্যা হয়েছে!", show_alert=True)
 
 
-@app.on_callback_query(filters.regex("start_menu"))
+@app.on_callback_query(filters.regex("^start_menu$"))
 async def start_menu_cb(client, query: CallbackQuery):
     try:
         caption = (

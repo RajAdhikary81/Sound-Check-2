@@ -129,12 +129,9 @@ async def games_menu(client, message: Message):
     await message.reply_text(text, reply_markup=games_menu_kb())
 
 
-@app.on_callback_query(filters.regex(r"^games_menu$|^help_menu$"))
+@app.on_callback_query(filters.regex(r"^help_menu_games$"))
 async def cb_open_games(client, cq: CallbackQuery):
-    if cq.data == "help_menu":
-        await cq.message.reply_text("⬇️ <code>/help</code> দাও সব কমান্ড দেখতে।")
-        return await cq.answer()
-    await cq.message.reply_text("🎮 <b>গেম মেনু</b>\nনিচ থেকে বেছে নাও:", reply_markup=games_menu_kb())
+    await cq.message.reply_text("⬇️ <code>/help</code> দাও সব কমান্ড দেখতে।")
     await cq.answer()
 
 

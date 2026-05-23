@@ -71,6 +71,20 @@ os.makedirs("downloads", exist_ok=True)
 ACTIVE_CHATS = {}
 
 
+def cleanup_downloads():
+    """পুরনো ডাউনলোড ফাইল মুছে দাও (disk space বাঁচাতে)"""
+    try:
+        for f in os.listdir("downloads"):
+            fpath = os.path.join("downloads", f)
+            if os.path.isfile(fpath):
+                try:
+                    os.remove(fpath)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
 def yt_search_sync(query: str):
     """youtube-search-python দিয়ে সার্চ (sync — Heroku-friendly)"""
     try:
@@ -193,6 +207,7 @@ def get_media(url: str, video: bool):
 
     # পদ্ধতি ২: Download fallback
     LOGGER.info("📥 Stream URL failed, falling back to download...")
+    cleanup_downloads()  # পুরনো ফাইল মুছে disk space ফাঁকা করো
     return download_media(url, video)
 
 
