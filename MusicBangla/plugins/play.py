@@ -9,67 +9,36 @@ from youtubesearchpython import VideosSearch
 import config
 from MusicBangla import app, assistant, calls, LOGGER
 
-# yt-dlp common options
-# Heroku-তে Node.js আছে কিন্তু EJS solver নেই।
-# yt-dlp Node.js detect করে signature solve করতে চায় → fail হয়।
-# তাই android_vr client explicitly force করা হচ্ছে যা JS ছাড়া কাজ করে।
-COMMON_OPTS = {
-    "quiet": True,
-    "no_warnings": True,
-    "geo_bypass": True,
-    "nocheckcertificate": True,
-    "noplaylist": True,
-    "source_address": "0.0.0.0",
-    "retries": 5,
-    "fragment_retries": 5,
-    "socket_timeout": 30,
-    "http_headers": {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/131.0.0.0 Safari/537.36"
-        ),
-    },
-    "extractor_args": {
-        "youtube": {
-            "player_client": ["android_vr"],
-        },
-    },
-}
-
-# cookies থাকলে যোগ করো
-if os.path.exists("cookies.txt"):
-    COMMON_OPTS["cookiefile"] = "cookies.txt"
-    LOGGER.info("✅ cookies.txt loaded for yt-dlp")
-
-# URL extraction options (ডাউনলোড ছাড়া সরাসরি stream URL)
-AUDIO_URL_OPTS = {
-    **COMMON_OPTS,
-    "format": "140/bestaudio/best",
-}
-
-VIDEO_URL_OPTS = {
-    **COMMON_OPTS,
-    "format": "18/best",
-}
-
-# Download options (fallback)
-AUDIO_DL_OPTS = {
-    **COMMON_OPTS,
-    "format": "140/bestaudio/best",
-    "outtmpl": "downloads/%(id)s.%(ext)s",
-    "concurrent_fragment_downloads": 10,
-}
-
-VIDEO_DL_OPTS = {
-    **COMMON_OPTS,
-    "format": "18/best",
-    "outtmpl": "downloads/%(id)s_v.%(ext)s",
-    "concurrent_fragment_downloads": 10,
-}
 
 os.makedirs("downloads", exist_ok=True)
 ACTIVE_CHATS = {}
+
+# cookies path
+_COOKIE_FILE = "cookies.txt" if os.path.exists("cookies.txt") else None
+if _COOKIE_FILE:
+    LOGGER.info("✅ cookies.txt loaded for yt-dlp")
+
+
+def _make_opts(fmt: str, download: bool = False, outtmpl: str = None):
+    """yt-dlp options তৈরি করে — /debug-এ যেভাবে কাজ করেছে ঠিক সেভাবে"""
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android_vr"],
+            },
+        },
+        "format": fmt,
+        "noplaylist": True,
+        "socket_timeout": 30,
+        "retries": 3,
+    }
+    if _COOKIE_FILE:
+        opts["cookiefile"] = _COOKIE_FILE
+    if outtmpl:
+        opts["outtmpl"] = outtmpl
+    return opts
 
 
 def cleanup_downloads():
@@ -137,18 +106,18 @@ def yt_search_sync(query: str):
 
 def get_stream_url(url: str, video: bool):
     """yt-dlp দিয়ে direct stream URL বের করো (ডাউনলোড ছাড়া)"""
-    opts = VIDEO_URL_OPTS if video else AUDIO_URL_OPTS
+    fmt = "18/best" if video else "140/bestaudio/best"
+    opts = _make_opts(fmt)
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
             stream_url = info.get("url")
             if stream_url:
-                LOGGER.info(f"✅ Got stream URL for: {info.get('title', 'unknown')}")
+                LOGGER.info(f"✅ Got stream URL: {info.get('format', '?')}")
                 return stream_url
-            # কিছু format-এ url সরাসরি থাকে না, requested_formats দেখো
+            # merged format হলে requested_formats দেখো
             formats = info.get("requested_formats")
             if formats:
-                # audio format-এর url নাও
                 for f in formats:
                     if not video and f.get("acodec") != "none":
                         return f.get("url")
@@ -156,28 +125,27 @@ def get_stream_url(url: str, video: bool):
                         return f.get("url")
             return None
     except Exception as e:
-        LOGGER.warning(f"Stream URL extraction failed: {e}")
+        LOGGER.warning(f"Stream URL failed: {e}")
         return None
 
 
 def download_media(url: str, video: bool):
     """মিডিয়া ডাউনলোড করে (fallback)"""
+    fmt = "18/best" if video else "140/bestaudio/best"
+    suffix = "_v" if video else ""
+    outtmpl = f"downloads/%(id)s{suffix}.%(ext)s"
+    opts = _make_opts(fmt, download=True, outtmpl=outtmpl)
     try:
-        opts = VIDEO_DL_OPTS if video else AUDIO_DL_OPTS
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             fname = ydl.prepare_filename(info)
 
             # extension বদলে যেতে পারে
             base = os.path.splitext(fname)[0]
-            if not video:
-                for ext in [".m4a", ".webm", ".opus", ".mp3", ".ogg", ".wav"]:
-                    if os.path.exists(base + ext):
-                        return base + ext
-            else:
-                for ext in [".mp4", ".mkv", ".webm"]:
-                    if os.path.exists(base + ext):
-                        return base + ext
+            extensions = [".m4a", ".webm", ".opus", ".mp3", ".ogg", ".wav"] if not video else [".mp4", ".mkv", ".webm"]
+            for ext in extensions:
+                if os.path.exists(base + ext):
+                    return base + ext
 
             if os.path.exists(fname):
                 return fname
@@ -185,12 +153,10 @@ def download_media(url: str, video: bool):
             # fallback: id দিয়ে খোঁজো
             vid_id = info.get("id", "")
             if vid_id:
-                prefix = f"downloads/{vid_id}"
-                suffix = "_v" if video else ""
+                prefix = f"downloads/{vid_id}{suffix}"
                 for ext in [".m4a", ".mp4", ".webm", ".opus", ".mp3", ".mkv", ".ogg"]:
-                    candidate = prefix + suffix + ext
-                    if os.path.exists(candidate):
-                        return candidate
+                    if os.path.exists(prefix + ext):
+                        return prefix + ext
 
             raise Exception("ফাইল পাওয়া যায়নি")
     except Exception as e:
