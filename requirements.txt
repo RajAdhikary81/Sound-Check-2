@@ -3,6 +3,7 @@ py-tgcalls==2.2.12
 ntgcalls
 tgcrypto
 yt-dlp
+youtube-search-python
 motor
 dnspython
 python-dotenv
