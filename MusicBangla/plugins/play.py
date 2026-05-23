@@ -31,20 +31,13 @@ if os.path.exists("cookies.txt"):
 
 AUDIO_OPTS = {
     **COMMON_OPTS,
-    "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+    "format": "bestaudio/best",
     "outtmpl": "downloads/%(id)s.%(ext)s",
-    "postprocessors": [
-        {
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "m4a",
-            "preferredquality": "192",
-        }
-    ],
 }
 
 VIDEO_OPTS = {
     **COMMON_OPTS,
-    "format": "best[height<=480][ext=mp4]/best[height<=480]/bestvideo[height<=480]+bestaudio/best",
+    "format": "best[height<=480]/best",
     "outtmpl": "downloads/%(id)s_v.%(ext)s",
 }
 
