@@ -10,8 +10,9 @@ import config
 from MusicBangla import app, assistant, calls, LOGGER
 
 # yt-dlp common options
-# js_runtimes ইচ্ছাকৃতভাবে সেট করা হয়নি — Heroku-তে EJS solver নেই,
-# yt-dlp নিজে থেকে android_vr client ব্যবহার করে যা JS ছাড়া কাজ করে
+# Heroku-তে Node.js আছে কিন্তু EJS solver নেই।
+# yt-dlp Node.js detect করে signature solve করতে চায় → fail হয়।
+# তাই android_vr client explicitly force করা হচ্ছে যা JS ছাড়া কাজ করে।
 COMMON_OPTS = {
     "quiet": True,
     "no_warnings": True,
@@ -22,13 +23,17 @@ COMMON_OPTS = {
     "retries": 5,
     "fragment_retries": 5,
     "socket_timeout": 30,
-    "prefer_free_formats": True,
     "http_headers": {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/131.0.0.0 Safari/537.36"
         ),
+    },
+    "extractor_args": {
+        "youtube": {
+            "player_client": ["android_vr"],
+        },
     },
 }
 
@@ -40,25 +45,25 @@ if os.path.exists("cookies.txt"):
 # URL extraction options (ডাউনলোড ছাড়া সরাসরি stream URL)
 AUDIO_URL_OPTS = {
     **COMMON_OPTS,
-    "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+    "format": "140/bestaudio/best",
 }
 
 VIDEO_URL_OPTS = {
     **COMMON_OPTS,
-    "format": "best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best",
+    "format": "18/best",
 }
 
 # Download options (fallback)
 AUDIO_DL_OPTS = {
     **COMMON_OPTS,
-    "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
+    "format": "140/bestaudio/best",
     "outtmpl": "downloads/%(id)s.%(ext)s",
     "concurrent_fragment_downloads": 10,
 }
 
 VIDEO_DL_OPTS = {
     **COMMON_OPTS,
-    "format": "best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best",
+    "format": "18/best",
     "outtmpl": "downloads/%(id)s_v.%(ext)s",
     "concurrent_fragment_downloads": 10,
 }
