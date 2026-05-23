@@ -57,8 +57,7 @@ async def debug_cmd(client, message: Message):
         opts = {
             "quiet": True,
             "no_warnings": True,
-            "extractor_args": {"youtube": {"player_client": ["android_vr"]}},
-            "format": "140/bestaudio/best",
+            "format": "bestaudio/best",
         }
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info("https://www.youtube.com/watch?v=dQw4w9WgXcQ", download=False)
@@ -68,6 +67,6 @@ async def debug_cmd(client, message: Message):
         lines.append(f"🎵 <b>Format test:</b> ❌ <code>{str(e)[:100]}</code>")
 
     # commit info
-    lines.append(f"\n📌 <b>Build:</b> <code>v7-fresh</code>")
+    lines.append(f"\n📌 <b>Build:</b> <code>v8-format-fix</code>")
 
     await message.reply_text("\n".join(lines))

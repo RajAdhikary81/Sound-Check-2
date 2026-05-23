@@ -20,15 +20,10 @@ if _COOKIE_FILE:
 
 
 def _make_opts(fmt: str, download: bool = False, outtmpl: str = None):
-    """yt-dlp options তৈরি করে — robust format selection সহ"""
+    """yt-dlp options তৈরি করে — কোনো player_client restriction নেই"""
     opts = {
         "quiet": True,
         "no_warnings": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["ios", "android", "web"],
-            },
-        },
         "format": fmt,
         "noplaylist": True,
         "socket_timeout": 30,
@@ -106,17 +101,16 @@ def yt_search_sync(query: str):
 
 
 def _audio_fmt():
-    """Audio format string — multiple fallbacks"""
-    return "140/251/250/249/bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best"
+    """Audio format string — generic selectors, কোনো hardcoded ID নেই"""
+    return "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best"
 
 
 def _video_fmt():
-    """Video format string — multiple fallbacks, max 720p for Heroku"""
+    """Video format string — generic selectors, max 720p"""
     return (
-        "18/"
-        "22/"
         "best[ext=mp4][height<=720]/"
         "best[height<=720]/"
+        "bestvideo[height<=720]+bestaudio/"
         "best[ext=mp4]/"
         "best"
     )
