@@ -22,7 +22,12 @@ COMMON_OPTS = {
     "fragment_retries": 5,
     "socket_timeout": 30,
     "http_headers": {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    },
+    "extractor_args": {
+        "youtube": {
+            "player_client": ["ios", "web_creator", "mweb"],
+        },
     },
 }
 
@@ -31,14 +36,22 @@ if os.path.exists("cookies.txt"):
 
 AUDIO_OPTS = {
     **COMMON_OPTS,
-    "format": "bestaudio/best",
+    "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio*/best",
     "outtmpl": "downloads/%(id)s.%(ext)s",
+    "postprocessors": [
+        {
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "m4a",
+            "preferredquality": "128",
+        }
+    ],
 }
 
 VIDEO_OPTS = {
     **COMMON_OPTS,
-    "format": "best[height<=480]/best",
+    "format": "best[height<=480][ext=mp4]/best[ext=mp4]/bestvideo[height<=480]+bestaudio/bestvideo+bestaudio/best",
     "outtmpl": "downloads/%(id)s_v.%(ext)s",
+    "merge_output_format": "mp4",
 }
 
 os.makedirs("downloads", exist_ok=True)
@@ -105,13 +118,29 @@ def download_media(url: str, video: bool):
             # audio post-process হলে extension বদলে যায়
             if not video:
                 base = os.path.splitext(fname)[0]
-                for ext in [".m4a", ".webm", ".opus", ".mp3", ".ogg"]:
+                for ext in [".m4a", ".webm", ".opus", ".mp3", ".ogg", ".wav"]:
                     if os.path.exists(base + ext):
                         return base + ext
-            return fname
+            # video merge হলে .mp4 হতে পারে
+            else:
+                base = os.path.splitext(fname)[0]
+                for ext in [".mp4", ".mkv", ".webm"]:
+                    if os.path.exists(base + ext):
+                        return base + ext
+            if os.path.exists(fname):
+                return fname
+            # fallback: downloads ফোল্ডারে id দিয়ে খুঁজি
+            vid_id = info.get("id", "")
+            if vid_id:
+                prefix = f"downloads/{vid_id}"
+                for ext in [".m4a", ".mp4", ".webm", ".opus", ".mp3", ".mkv", ".ogg"]:
+                    candidate = prefix + ("_v" if video else "") + ext
+                    if os.path.exists(candidate):
+                        return candidate
+            raise Exception("ডাউনলোড সম্পন্ন কিন্তু ফাইল খুঁজে পাওয়া যায়নি")
     except Exception as e:
         LOGGER.error(f"Download error: {e}")
-        raise Exception(f"ডাউনলোড ব্যর্থ: {str(e)[:100]}")
+        raise Exception(f"ডাউনলোড ব্যর্থ: {str(e)[:150]}")
 
 
 def fmt_dur(s):
