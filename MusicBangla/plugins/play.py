@@ -1,5 +1,7 @@
 import os
 import asyncio
+import time
+import re
 import yt_dlp
 from pyrogram import filters
 from pyrogram.types import Message
@@ -13,23 +15,71 @@ from MusicBangla import app, assistant, calls, LOGGER
 os.makedirs("downloads", exist_ok=True)
 ACTIVE_CHATS = {}
 
-# cookies path
+# --- Rate limiting ---
+_USER_COOLDOWN = {}
+_COOLDOWN_SECONDS = 5
+
+# --- Cookies ---
 _COOKIE_FILE = "cookies.txt" if os.path.exists("cookies.txt") else None
 if _COOKIE_FILE:
-    LOGGER.info("✅ cookies.txt loaded for yt-dlp")
+    LOGGER.info("cookies.txt loaded for yt-dlp")
 
 
-def _make_opts(fmt: str, download: bool = False, outtmpl: str = None):
-    """yt-dlp options তৈরি করে — কোনো player_client restriction নেই"""
+# =====================================================
+# FORMAT STRATEGIES — multiple fallback chains
+# =====================================================
+
+_AUDIO_STRATEGIES = [
+    # Strategy 1: standard best audio
+    "bestaudio/best",
+    # Strategy 2: specific containers
+    "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio/best",
+    # Strategy 3: any audio with decent bitrate
+    "worstaudio/worst",
+]
+
+_VIDEO_STRATEGIES = [
+    # Strategy 1: standard best <=720p
+    "best[height<=720]/best",
+    # Strategy 2: separate video+audio merge
+    "bestvideo[height<=720]+bestaudio/bestvideo+bestaudio/best",
+    # Strategy 3: any mp4
+    "best[ext=mp4]/best",
+    # Strategy 4: absolute fallback
+    "worst",
+]
+
+# YouTube player client fallbacks — helps bypass restrictions
+_PLAYER_CLIENTS = [
+    None,  # default
+    ["web"],
+    ["android"],
+    ["ios"],
+    ["tv"],
+    ["web", "android"],
+    ["mweb"],
+]
+
+
+def _make_opts(fmt: str, player_client=None, download: bool = False, outtmpl: str = None):
+    """yt-dlp options builder with player client support"""
     opts = {
         "quiet": True,
         "no_warnings": True,
         "format": fmt,
         "noplaylist": True,
-        "socket_timeout": 30,
-        "retries": 5,
-        "fragment_retries": 5,
+        "socket_timeout": 20,
+        "retries": 3,
+        "fragment_retries": 3,
+        "ignoreerrors": False,
+        "geo_bypass": True,
+        "nocheckcertificate": True,
+        "prefer_insecure": True,
+        "no_check_formats": True,
+        "source_address": "0.0.0.0",
     }
+    if player_client:
+        opts["extractor_args"] = {"youtube": {"player_client": player_client}}
     if _COOKIE_FILE:
         opts["cookiefile"] = _COOKIE_FILE
     if outtmpl:
@@ -38,7 +88,7 @@ def _make_opts(fmt: str, download: bool = False, outtmpl: str = None):
 
 
 def cleanup_downloads():
-    """পুরনো ডাউনলোড ফাইল মুছে দাও (disk space বাঁচাতে)"""
+    """Delete old download files to save disk space"""
     try:
         for f in os.listdir("downloads"):
             fpath = os.path.join("downloads", f)
@@ -51,8 +101,12 @@ def cleanup_downloads():
         pass
 
 
+# =====================================================
+# SEARCH
+# =====================================================
+
 def yt_search_sync(query: str):
-    """youtube-search-python দিয়ে সার্চ (sync — Heroku-friendly)"""
+    """YouTube search via youtube-search-python (sync)"""
     try:
         search = VideosSearch(query, limit=1)
         result = search.result()
@@ -65,7 +119,6 @@ def yt_search_sync(query: str):
         vid = video.get("id")
         title = video.get("title", "Unknown")
 
-        # duration parse
         dur_text = video.get("duration", "0:00")
         dur_parts = str(dur_text).split(":")
         try:
@@ -78,10 +131,8 @@ def yt_search_sync(query: str):
         except Exception:
             duration = 0
 
-        # thumbnail
         thumbs = video.get("thumbnails")
         thumb = thumbs[-1]["url"] if thumbs else f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
-
         channel = video.get("channel", {}).get("name", "YouTube")
 
         info = {
@@ -92,7 +143,7 @@ def yt_search_sync(query: str):
             "channel": channel,
             "id": vid,
         }
-        LOGGER.info(f"✅ Found: {title} | {vid} | {dur_text}")
+        LOGGER.info(f"Found: {title} | {vid} | {dur_text}")
         return info
 
     except Exception as e:
@@ -100,98 +151,127 @@ def yt_search_sync(query: str):
         return None
 
 
-def _audio_fmt():
-    """Audio format string — generic selectors, কোনো hardcoded ID নেই"""
-    return "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best"
-
-
-def _video_fmt():
-    """Video format string — generic selectors, max 720p"""
-    return (
-        "best[ext=mp4][height<=720]/"
-        "best[height<=720]/"
-        "bestvideo[height<=720]+bestaudio/"
-        "best[ext=mp4]/"
-        "best"
-    )
-
+# =====================================================
+# STREAM URL — multi-strategy retry with 2-3s intervals
+# =====================================================
 
 def get_stream_url(url: str, video: bool):
-    """yt-dlp দিয়ে direct stream URL বের করো (ডাউনলোড ছাড়া)"""
-    fmt = _video_fmt() if video else _audio_fmt()
-    opts = _make_opts(fmt)
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            stream_url = info.get("url")
-            if stream_url:
-                LOGGER.info(f"✅ Got stream URL: {info.get('format', '?')}")
-                return stream_url
-            # merged format হলে requested_formats দেখো
-            formats = info.get("requested_formats")
-            if formats:
-                for f in formats:
-                    if not video and f.get("acodec") != "none":
-                        LOGGER.info(f"✅ Got audio from merged: {f.get('format', '?')}")
-                        return f.get("url")
-                    if video:
-                        LOGGER.info(f"✅ Got video from merged: {f.get('format', '?')}")
-                        return f.get("url")
-            LOGGER.warning(f"No stream URL found in info for {url}")
-            return None
-    except Exception as e:
-        LOGGER.warning(f"Stream URL failed for {url}: {e}")
-        return None
+    """
+    Try to get a direct stream URL using multiple format strategies
+    and player client combinations. Retries every 2-3 seconds.
+    """
+    strategies = _VIDEO_STRATEGIES if video else _AUDIO_STRATEGIES
 
+    for strat_idx, fmt in enumerate(strategies):
+        for pc_idx, player_client in enumerate(_PLAYER_CLIENTS):
+            pc_name = str(player_client) if player_client else "default"
+            LOGGER.info(
+                f"Stream attempt: fmt={fmt[:30]}... client={pc_name}"
+            )
+            opts = _make_opts(fmt, player_client=player_client)
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+
+                    stream_url = info.get("url")
+                    if stream_url:
+                        LOGGER.info(
+                            f"Got stream URL via fmt strategy {strat_idx}, "
+                            f"client={pc_name}, format={info.get('format', '?')}"
+                        )
+                        return stream_url
+
+                    # merged format — extract audio/video URL
+                    req_fmts = info.get("requested_formats")
+                    if req_fmts:
+                        for f in req_fmts:
+                            if not video and f.get("acodec") != "none":
+                                LOGGER.info(f"Got audio from merged: {f.get('format', '?')}")
+                                return f.get("url")
+                            if video and f.get("vcodec") != "none":
+                                LOGGER.info(f"Got video from merged: {f.get('format', '?')}")
+                                return f.get("url")
+                        # if video, return first available
+                        if video and req_fmts:
+                            return req_fmts[0].get("url")
+
+            except Exception as e:
+                err_str = str(e)
+                LOGGER.warning(f"Stream failed (fmt={strat_idx}, client={pc_name}): {err_str[:80]}")
+
+            # Wait 2-3 seconds before next attempt
+            time.sleep(2)
+
+    LOGGER.error(f"All stream strategies exhausted for {url}")
+    return None
+
+
+# =====================================================
+# DOWNLOAD MEDIA — multi-strategy retry fallback
+# =====================================================
 
 def download_media(url: str, video: bool):
-    """মিডিয়া ডাউনলোড করে (fallback)"""
-    fmt = _video_fmt() if video else _audio_fmt()
+    """Download media with multiple format/client fallback strategies"""
+    strategies = _VIDEO_STRATEGIES if video else _AUDIO_STRATEGIES
     suffix = "_v" if video else ""
     outtmpl = f"downloads/%(id)s{suffix}.%(ext)s"
-    opts = _make_opts(fmt, download=True, outtmpl=outtmpl)
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            fname = ydl.prepare_filename(info)
 
-            # extension বদলে যেতে পারে
-            base = os.path.splitext(fname)[0]
-            extensions = [".m4a", ".webm", ".opus", ".mp3", ".ogg", ".wav"] if not video else [".mp4", ".mkv", ".webm"]
-            for ext in extensions:
-                if os.path.exists(base + ext):
-                    return base + ext
+    for strat_idx, fmt in enumerate(strategies):
+        for pc_idx, player_client in enumerate(_PLAYER_CLIENTS[:4]):  # limit client retries for download
+            pc_name = str(player_client) if player_client else "default"
+            LOGGER.info(f"Download attempt: fmt={fmt[:30]}... client={pc_name}")
+            opts = _make_opts(fmt, player_client=player_client, download=True, outtmpl=outtmpl)
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    fname = ydl.prepare_filename(info)
 
-            if os.path.exists(fname):
-                return fname
+                    base = os.path.splitext(fname)[0]
+                    all_exts = [".m4a", ".webm", ".opus", ".mp3", ".ogg", ".wav",
+                                ".mp4", ".mkv", ".3gp", ".flv"]
+                    for ext in all_exts:
+                        if os.path.exists(base + ext):
+                            LOGGER.info(f"Downloaded: {base + ext}")
+                            return base + ext
 
-            # fallback: id দিয়ে খোঁজো
-            vid_id = info.get("id", "")
-            if vid_id:
-                prefix = f"downloads/{vid_id}{suffix}"
-                for ext in [".m4a", ".mp4", ".webm", ".opus", ".mp3", ".mkv", ".ogg"]:
-                    if os.path.exists(prefix + ext):
-                        return prefix + ext
+                    if os.path.exists(fname):
+                        LOGGER.info(f"Downloaded: {fname}")
+                        return fname
 
-            raise Exception("ফাইল পাওয়া যায়নি")
-    except Exception as e:
-        LOGGER.error(f"Download error: {e}")
-        raise Exception(f"ডাউনলোড ব্যর্থ: {str(e)[:150]}")
+                    # fallback: search by id
+                    vid_id = info.get("id", "")
+                    if vid_id:
+                        prefix = f"downloads/{vid_id}{suffix}"
+                        for ext in all_exts:
+                            if os.path.exists(prefix + ext):
+                                LOGGER.info(f"Downloaded (id match): {prefix + ext}")
+                                return prefix + ext
+
+            except Exception as e:
+                LOGGER.warning(f"Download failed (fmt={strat_idx}, client={pc_name}): {str(e)[:80]}")
+
+            time.sleep(2)
+
+    raise Exception("All download strategies exhausted. Try a different song.")
 
 
 def get_media(url: str, video: bool):
-    """প্রথমে stream URL চেষ্টা করো, ব্যর্থ হলে download করো"""
-    # পদ্ধতি ১: Direct stream URL (দ্রুত, ডাউনলোড লাগে না)
+    """Try stream URL first, then download as fallback."""
+    # Method 1: Direct stream URL (fast, no download)
     stream_url = get_stream_url(url, video)
     if stream_url:
-        LOGGER.info("🎯 Using direct stream URL (no download)")
+        LOGGER.info("Using direct stream URL (no download needed)")
         return stream_url
 
-    # পদ্ধতি ২: Download fallback
-    LOGGER.info("📥 Stream URL failed, falling back to download...")
-    cleanup_downloads()  # পুরনো ফাইল মুছে disk space ফাঁকা করো
+    # Method 2: Download fallback
+    LOGGER.info("Stream URL failed, falling back to download...")
+    cleanup_downloads()
     return download_media(url, video)
 
+
+# =====================================================
+# HELPERS
+# =====================================================
 
 def fmt_dur(s):
     if not s:
@@ -215,42 +295,40 @@ async def safe_react(client, message, emoji):
 
 
 async def ensure_assistant(chat_id: int):
-    """Assistant গ্রুপে আছে কিনা নিশ্চিত করে"""
+    """Ensure assistant is in the group"""
     try:
         me = await assistant.get_me()
         await assistant.get_chat_member(chat_id, me.id)
-        LOGGER.info(f"✅ Assistant already in {chat_id}")
+        LOGGER.info(f"Assistant already in {chat_id}")
         return True
     except Exception:
-        LOGGER.info(f"⚠️ Assistant not in {chat_id}, joining...")
+        LOGGER.info(f"Assistant not in {chat_id}, joining...")
 
-    # চেষ্টা ১: invite link
     try:
         invite = await app.export_chat_invite_link(chat_id)
         await assistant.join_chat(invite)
         await asyncio.sleep(5)
-        LOGGER.info(f"✅ Assistant joined via invite")
+        LOGGER.info("Assistant joined via invite")
         return True
     except Exception as e:
         LOGGER.warning(f"Invite join failed: {e}")
 
-    # চেষ্টা ২: username
     try:
         chat = await app.get_chat(chat_id)
         if chat.username:
             await assistant.join_chat(chat.username)
             await asyncio.sleep(5)
-            LOGGER.info(f"✅ Assistant joined via @{chat.username}")
+            LOGGER.info(f"Assistant joined via @{chat.username}")
             return True
     except Exception as e:
         LOGGER.warning(f"Username join failed: {e}")
 
-    LOGGER.error(f"❌ Could not join {chat_id}")
+    LOGGER.error(f"Could not join {chat_id}")
     return False
 
 
-async def try_play_stream(chat_id, media_path, video, max_retries=3):
-    """Voice Chat-এ play করে — retry সহ"""
+async def try_play_stream(chat_id, media_path, video, max_retries=4):
+    """Play in voice chat with retry logic — 3s intervals"""
     if video:
         stream = MediaStream(media_path, video_flags=MediaStream.Flags.AUTO_DETECT)
     else:
@@ -259,9 +337,9 @@ async def try_play_stream(chat_id, media_path, video, max_retries=3):
     last_error = None
     for attempt in range(1, max_retries + 1):
         try:
-            LOGGER.info(f"🎚 Play attempt {attempt}/{max_retries}")
+            LOGGER.info(f"Play attempt {attempt}/{max_retries}")
             await calls.play(chat_id, stream)
-            LOGGER.info(f"✅ Playing in {chat_id}")
+            LOGGER.info(f"Playing in {chat_id}")
             return True
         except Exception as e:
             last_error = e
@@ -270,7 +348,7 @@ async def try_play_stream(chat_id, media_path, video, max_retries=3):
 
             if "no active group call" in err or "group_call_invalid" in err:
                 if attempt < max_retries:
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(3)
                     continue
                 return "NO_VC"
             elif "chat_admin_required" in err or "not found" in err:
@@ -284,27 +362,78 @@ async def try_play_stream(chat_id, media_path, video, max_retries=3):
     return f"FAILED: {str(last_error)[:100]}"
 
 
+# =====================================================
+# SECURITY: Input validation & rate limiting
+# =====================================================
+
+def _sanitize_query(text: str) -> str:
+    """Sanitize user input to prevent injection"""
+    # Remove any suspicious characters, keep only safe ones
+    text = text.strip()
+    # Limit length
+    if len(text) > 200:
+        text = text[:200]
+    # Remove null bytes and control characters
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+    return text
+
+
+def _check_rate_limit(user_id: int) -> bool:
+    """Returns True if user is rate-limited (should wait)"""
+    now = time.time()
+    last = _USER_COOLDOWN.get(user_id, 0)
+    if now - last < _COOLDOWN_SECONDS:
+        return True
+    _USER_COOLDOWN[user_id] = now
+    return False
+
+
+def _is_valid_url(text: str) -> bool:
+    """Check if text is a valid YouTube URL"""
+    yt_patterns = [
+        r'https?://(www\.)?youtube\.com/watch\?v=[\w-]+',
+        r'https?://youtu\.be/[\w-]+',
+        r'https?://music\.youtube\.com/watch\?v=[\w-]+',
+    ]
+    return any(re.match(p, text) for p in yt_patterns)
+
+
+# =====================================================
+# MAIN PLAY FUNCTION
+# =====================================================
+
 async def _play(client, message: Message, video: bool):
-    """গান/ভিডিও প্লে করার মূল ফাংশন"""
+    """Main play function with retry, fallback, and security"""
     await safe_react(client, message, config.random_emoji())
     cmd = "vplay" if video else "play"
 
-    if len(message.command) < 2 and not message.reply_to_message:
+    # Security: rate limiting
+    if _check_rate_limit(message.from_user.id):
         return await message.reply_text(
-            f"❌ **গানের নাম দাও!**\n\nউদাহরণ: `/{cmd} tum hi ho`"
+            f"⏳ **অনুগ্রহ করে {_COOLDOWN_SECONDS} সেকেন্ড অপেক্ষা করুন।**"
         )
 
-    query = (
+    if len(message.command) < 2 and not message.reply_to_message:
+        return await message.reply_text(
+            f"**গানের নাম দাও!**\n\nউদাহরণ: `/{cmd} tum hi ho`"
+        )
+
+    raw_query = (
         " ".join(message.command[1:])
         if len(message.command) > 1
         else (message.reply_to_message.text or "")
     )
 
-    status = await message.reply_text("🔎 **খুঁজছি...**")
+    # Security: sanitize input
+    query = _sanitize_query(raw_query)
+    if not query:
+        return await message.reply_text("**সঠিক গানের নাম দাও!**")
+
+    status = await message.reply_text("**খুঁজছি...**")
 
     try:
-        # Step 1: সার্চ (youtube-search-python — async)
-        LOGGER.info(f"🔍 Searching: {query}")
+        # Step 1: Search
+        LOGGER.info(f"Searching: {query}")
         loop = asyncio.get_event_loop()
         try:
             info = await asyncio.wait_for(
@@ -312,28 +441,27 @@ async def _play(client, message: Message, video: bool):
                 timeout=15,
             )
         except asyncio.TimeoutError:
-            return await status.edit("⏱ সার্চ টাইমআউট। আবার চেষ্টা করুন।")
+            return await status.edit("Search timeout. Try again.")
         except Exception as e:
             LOGGER.error(f"Search failed: {e}")
-            return await status.edit(f"❌ সার্চ ব্যর্থ: `{str(e)[:80]}`")
+            return await status.edit(f"Search failed: `{str(e)[:80]}`")
 
         if not info:
             return await status.edit(
-                f"❌ **'{query}'** খুঁজে পাওয়া যায়নি।\n"
-                f"অন্য নাম দিয়ে চেষ্টা করুন।"
+                f"**'{query}'** not found.\nTry a different name."
             )
 
-        # Step 2: Status
+        # Step 2: Status update
         icon = "🎬" if video else "🎵"
         await status.edit(
             f"📥 **মিডিয়া লোড হচ্ছে...**\n\n"
             f"{icon} `{info['title'][:50]}`\n"
             f"⏱ `{fmt_dur(info['duration'])}`\n\n"
-            f"⏳ অপেক্ষা করুন..."
+            f"⏳ অপেক্ষা করুন (retry সহ লোড হচ্ছে)..."
         )
 
         # Step 3: Assistant + Media (parallel)
-        LOGGER.info(f"🎵 Getting media: {info['link']}")
+        LOGGER.info(f"Getting media: {info['link']}")
 
         assistant_ok, media_path = await asyncio.gather(
             ensure_assistant(message.chat.id),
@@ -344,26 +472,26 @@ async def _play(client, message: Message, video: bool):
         if isinstance(assistant_ok, Exception) or assistant_ok is False:
             LOGGER.error(f"Assistant error: {assistant_ok}")
             return await status.edit(
-                "❌ **Assistant গ্রুপে যোগ হতে পারেনি!**\n\n"
-                "🔧 Assistant অ্যাকাউন্ট manually গ্রুপে add করুন,\n"
+                "**Assistant গ্রুপে যোগ হতে পারেনি!**\n\n"
+                "Assistant অ্যাকাউন্ট manually গ্রুপে add করুন,\n"
                 "বটকে admin করুন, তারপর `/play` দিন।"
             )
 
         if isinstance(media_path, Exception):
             LOGGER.error(f"Media error: {media_path}")
             return await status.edit(
-                f"❌ **ডাউনলোড ব্যর্থ!**\n`{str(media_path)[:100]}`\n\n"
-                f"🔧 আবার চেষ্টা করুন বা অন্য গান দিন।"
+                f"**ডাউনলোড ব্যর্থ!**\n`{str(media_path)[:100]}`\n\n"
+                f"আবার চেষ্টা করুন বা অন্য গান দিন।"
             )
 
         if not media_path:
-            return await status.edit("❌ মিডিয়া পাওয়া যায়নি। অন্য গান দিয়ে চেষ্টা করুন।")
+            return await status.edit("মিডিয়া পাওয়া যায়নি। অন্য গান দিয়ে চেষ্টা করুন।")
 
-        LOGGER.info(f"✅ Downloaded: {media_path}")
+        LOGGER.info(f"Media ready: {media_path}")
 
-        # Step 4: Play
+        # Step 4: Play with retry
         await status.edit("🎶 **Voice Chat-এ যোগ হচ্ছে...**")
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
 
         result = await try_play_stream(message.chat.id, str(media_path), video)
 
@@ -371,22 +499,22 @@ async def _play(client, message: Message, video: bool):
             ACTIVE_CHATS[message.chat.id] = info
         elif result == "NO_VC":
             return await status.edit(
-                "❌ **Voice Chat চালু নেই!**\n\n"
-                "🔧 গ্রুপে Voice Chat শুরু করুন,\n"
+                "**Voice Chat চালু নেই!**\n\n"
+                "গ্রুপে Voice Chat শুরু করুন,\n"
                 "তারপর `/play` দিন।"
             )
         elif result == "NO_PERM":
             return await status.edit(
-                "❌ **Permission নেই!**\n\n"
-                "🔧 Assistant-কে admin করুন\n"
+                "**Permission নেই!**\n\n"
+                "Assistant-কে admin করুন\n"
                 "(Manage Voice Chats permission দিন)।"
             )
         else:
             return await status.edit(
-                f"❌ **স্ট্রিমিং ব্যর্থ!**\n`{result}`\n\n`/stop` করে আবার `/play` দিন।"
+                f"**স্ট্রিমিং ব্যর্থ!**\n`{result}`\n\n`/stop` করে আবার `/play` দিন।"
             )
 
-        # Step 5: সাফল্য
+        # Step 5: Success message
         try:
             await status.delete()
         except Exception:
@@ -418,7 +546,7 @@ async def _play(client, message: Message, video: bool):
         import traceback
         traceback.print_exc()
         try:
-            await status.edit(f"❌ ত্রুটি: `{str(e)[:100]}`")
+            await status.edit(f"ত্রুটি: `{str(e)[:100]}`")
         except Exception:
             pass
 

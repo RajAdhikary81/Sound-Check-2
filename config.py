@@ -4,16 +4,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-API_ID = int(os.getenv("API_ID", "30137409"))
-API_HASH = os.getenv("API_HASH", "3336d0f8c9de7cd33b55c655032fa7b3")
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-OWNER_ID = int(os.getenv("OWNER_ID", "5358817399"))
-OWNER_USERNAME = os.getenv("OWNER_USERNAME", "R4J_81")
-STRING_SESSION = os.getenv("STRING_SESSION", "")
-MONGO_DB_URI = os.getenv("MONGO_DB_URI", "mongodb+srv://Raj07Sukh:Raj07Sukh@cluster0.1ca9rrn.mongodb.net/?appName=Cluster0")
-LOG_GROUP_ID = int(os.getenv("LOG_GROUP_ID", "-1003935489315"))
-SUPPORT_GROUP = os.getenv("SUPPORT_GROUP", "https://t.me/+OvozYu7R1EczMGJl")
-SUPPORT_CHANNEL = os.getenv("SUPPORT_CHANNEL", "https://t.me/RupkothaGolpo")
+# --- Security: All sensitive values MUST come from env vars, no hardcoded defaults ---
+API_ID = int(os.environ.get("API_ID", "0"))
+API_HASH = os.environ.get("API_HASH", "")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
+OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "")
+STRING_SESSION = os.environ.get("STRING_SESSION", "")
+MONGO_DB_URI = os.environ.get("MONGO_DB_URI", "")
+LOG_GROUP_ID = int(os.environ.get("LOG_GROUP_ID", "0"))
+SUPPORT_GROUP = os.environ.get("SUPPORT_GROUP", "")
+SUPPORT_CHANNEL = os.environ.get("SUPPORT_CHANNEL", "")
 GITHUB_URL = "https://github.com/RajSukh81/MusicBangla"
 
 START_IMAGES = [

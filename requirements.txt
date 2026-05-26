@@ -2,7 +2,7 @@ pyrofork==2.3.21
 py-tgcalls==2.2.12
 ntgcalls
 tgcrypto
-yt-dlp==2025.6.9
+yt-dlp
 youtube-search-python
 httpx<0.28
 motor

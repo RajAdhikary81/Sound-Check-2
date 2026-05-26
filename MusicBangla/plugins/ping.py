@@ -67,6 +67,6 @@ async def debug_cmd(client, message: Message):
         lines.append(f"🎵 <b>Format test:</b> ❌ <code>{str(e)[:100]}</code>")
 
     # commit info
-    lines.append(f"\n📌 <b>Build:</b> <code>v8-format-fix</code>")
+    lines.append(f"\n📌 <b>Build:</b> <code>v9-multi-strategy-fix</code>")
 
     await message.reply_text("\n".join(lines))
