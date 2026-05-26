@@ -51,6 +51,14 @@ async def main():
     except Exception as e:
         LOGGER.error(f"❌ Plugins লোড ব্যর্থ: {e}")
 
+    # ✅ Step 4.5: Security data লোড
+    try:
+        from MusicBangla.plugins.security import load_security_data
+        await load_security_data()
+        LOGGER.info("✅ Security data লোড হয়েছে")
+    except Exception as e:
+        LOGGER.warning(f"⚠️ Security data load: {e}")
+
     # ✅ Step 5: Log group-এ startup message পাঠান
     try:
         startup_text = (

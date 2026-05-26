@@ -3,6 +3,7 @@ import asyncio
 import time
 import re
 import yt_dlp
+import httpx
 from pyrogram import filters
 from pyrogram.types import Message
 from pytgcalls.types import MediaStream
@@ -15,9 +16,11 @@ from MusicBangla import app, assistant, calls, LOGGER
 os.makedirs("downloads", exist_ok=True)
 ACTIVE_CHATS = {}
 
-# --- Rate limiting ---
+# --- Rate limiting & flood protection ---
 _USER_COOLDOWN = {}
 _COOLDOWN_SECONDS = 5
+_GLOBAL_SPAM = {}
+_MAX_CONCURRENT = 3  # max concurrent plays
 
 # --- Cookies ---
 _COOKIE_FILE = "cookies.txt" if os.path.exists("cookies.txt") else None
@@ -26,69 +29,57 @@ if _COOKIE_FILE:
 
 
 # =====================================================
-# FORMAT STRATEGIES — multiple fallback chains
+# YT-DLP OPTIONS — optimized for current YouTube
 # =====================================================
 
-_AUDIO_STRATEGIES = [
-    # Strategy 1: standard best audio
-    "bestaudio/best",
-    # Strategy 2: specific containers
-    "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio[ext=opus]/bestaudio/best",
-    # Strategy 3: any audio with decent bitrate
-    "worstaudio/worst",
-]
-
-_VIDEO_STRATEGIES = [
-    # Strategy 1: standard best <=720p
-    "best[height<=720]/best",
-    # Strategy 2: separate video+audio merge
-    "bestvideo[height<=720]+bestaudio/bestvideo+bestaudio/best",
-    # Strategy 3: any mp4
-    "best[ext=mp4]/best",
-    # Strategy 4: absolute fallback
-    "worst",
-]
-
-# YouTube player client fallbacks — helps bypass restrictions
-_PLAYER_CLIENTS = [
-    None,  # default
-    ["web"],
-    ["android"],
-    ["ios"],
-    ["tv"],
-    ["web", "android"],
-    ["mweb"],
-]
-
-
-def _make_opts(fmt: str, player_client=None, download: bool = False, outtmpl: str = None):
-    """yt-dlp options builder with player client support"""
+def _base_opts():
+    """Base yt-dlp options common to all strategies"""
     opts = {
         "quiet": True,
         "no_warnings": True,
-        "format": fmt,
         "noplaylist": True,
-        "socket_timeout": 20,
+        "socket_timeout": 15,
         "retries": 3,
         "fragment_retries": 3,
-        "ignoreerrors": False,
         "geo_bypass": True,
         "nocheckcertificate": True,
-        "prefer_insecure": True,
         "no_check_formats": True,
         "source_address": "0.0.0.0",
+        # Force yt-dlp to not check format availability
+        "format_sort": ["abr", "asr"],
     }
-    if player_client:
-        opts["extractor_args"] = {"youtube": {"player_client": player_client}}
     if _COOKIE_FILE:
         opts["cookiefile"] = _COOKIE_FILE
-    if outtmpl:
-        opts["outtmpl"] = outtmpl
     return opts
 
 
+# Ordered list of (format_string, player_client, description)
+# Each is tried in order. First success wins.
+_STRATEGIES = [
+    # --- Phase 1: android_vr bypasses PO token (most reliable in 2025-2026) ---
+    ("bestaudio/best", ["android_vr"], "android_vr+bestaudio"),
+    ("best", ["android_vr"], "android_vr+best"),
+
+    # --- Phase 2: tv_embedded also bypasses PO token ---
+    ("bestaudio/best", ["tv_embedded"], "tv_embedded+bestaudio"),
+    ("best", ["tv_embedded"], "tv_embedded+best"),
+
+    # --- Phase 3: mediaconnect (newer client) ---
+    ("bestaudio/best", ["mediaconnect"], "mediaconnect+bestaudio"),
+
+    # --- Phase 4: standard clients with cookies ---
+    ("bestaudio/best", ["web"], "web+bestaudio"),
+    ("bestaudio/best", ["android"], "android+bestaudio"),
+    ("bestaudio/best", None, "default+bestaudio"),
+
+    # --- Phase 5: absolute fallback ---
+    ("worst", ["android_vr"], "android_vr+worst"),
+    ("worst", None, "default+worst"),
+]
+
+
 def cleanup_downloads():
-    """Delete old download files to save disk space"""
+    """Delete download files to save disk space"""
     try:
         for f in os.listdir("downloads"):
             fpath = os.path.join("downloads", f)
@@ -135,7 +126,7 @@ def yt_search_sync(query: str):
         thumb = thumbs[-1]["url"] if thumbs else f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
         channel = video.get("channel", {}).get("name", "YouTube")
 
-        info = {
+        return {
             "title": title,
             "duration": duration,
             "link": f"https://www.youtube.com/watch?v={vid}",
@@ -143,130 +134,255 @@ def yt_search_sync(query: str):
             "channel": channel,
             "id": vid,
         }
-        LOGGER.info(f"Found: {title} | {vid} | {dur_text}")
-        return info
-
     except Exception as e:
         LOGGER.error(f"Search error: {e}")
         return None
 
 
 # =====================================================
-# STREAM URL — multi-strategy retry with 2-3s intervals
+# COBALT API FALLBACK — when yt-dlp completely fails
 # =====================================================
 
-def get_stream_url(url: str, video: bool):
-    """
-    Try to get a direct stream URL using multiple format strategies
-    and player client combinations. Retries every 2-3 seconds.
-    """
-    strategies = _VIDEO_STRATEGIES if video else _AUDIO_STRATEGIES
+_COBALT_APIS = [
+    "https://cobalt-api.ayo.tf",
+    "https://cobalt.api.timelessnesses.me",
+    "https://api.cobalt.best",
+]
 
-    for strat_idx, fmt in enumerate(strategies):
-        for pc_idx, player_client in enumerate(_PLAYER_CLIENTS):
-            pc_name = str(player_client) if player_client else "default"
-            LOGGER.info(
-                f"Stream attempt: fmt={fmt[:30]}... client={pc_name}"
-            )
-            opts = _make_opts(fmt, player_client=player_client)
-            try:
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
 
-                    stream_url = info.get("url")
-                    if stream_url:
-                        LOGGER.info(
-                            f"Got stream URL via fmt strategy {strat_idx}, "
-                            f"client={pc_name}, format={info.get('format', '?')}"
-                        )
-                        return stream_url
+def _cobalt_get_url(youtube_url: str, video: bool = False) -> str:
+    """Get stream URL via Cobalt API (public instances)"""
+    payload = {
+        "url": youtube_url,
+        "downloadMode": "auto" if video else "audio",
+        "audioFormat": "opus",
+    }
+    if video:
+        payload["videoQuality"] = "720"
 
-                    # merged format — extract audio/video URL
-                    req_fmts = info.get("requested_formats")
-                    if req_fmts:
-                        for f in req_fmts:
-                            if not video and f.get("acodec") != "none":
-                                LOGGER.info(f"Got audio from merged: {f.get('format', '?')}")
-                                return f.get("url")
-                            if video and f.get("vcodec") != "none":
-                                LOGGER.info(f"Got video from merged: {f.get('format', '?')}")
-                                return f.get("url")
-                        # if video, return first available
-                        if video and req_fmts:
-                            return req_fmts[0].get("url")
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
 
-            except Exception as e:
-                err_str = str(e)
-                LOGGER.warning(f"Stream failed (fmt={strat_idx}, client={pc_name}): {err_str[:80]}")
+    for api_base in _COBALT_APIS:
+        try:
+            LOGGER.info(f"Cobalt attempt: {api_base}")
+            with httpx.Client(timeout=20, follow_redirects=True) as client:
+                resp = client.post(f"{api_base}/", json=payload, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    dl_url = data.get("url") or data.get("audio")
+                    if dl_url:
+                        LOGGER.info(f"Cobalt success from {api_base}")
+                        return dl_url
+                    LOGGER.warning(f"Cobalt {api_base} returned no URL: {data}")
+                else:
+                    LOGGER.warning(f"Cobalt {api_base} HTTP {resp.status_code}")
+        except Exception as e:
+            LOGGER.warning(f"Cobalt {api_base} error: {str(e)[:60]}")
+        time.sleep(1)
 
-            # Wait 2-3 seconds before next attempt
-            time.sleep(2)
-
-    LOGGER.error(f"All stream strategies exhausted for {url}")
     return None
 
 
 # =====================================================
-# DOWNLOAD MEDIA — multi-strategy retry fallback
+# PIPED API FALLBACK
 # =====================================================
 
-def download_media(url: str, video: bool):
-    """Download media with multiple format/client fallback strategies"""
-    strategies = _VIDEO_STRATEGIES if video else _AUDIO_STRATEGIES
+_PIPED_APIS = [
+    "https://pipedapi.kavin.rocks",
+    "https://piped-api.privacy.com.de",
+    "https://api.piped.yt",
+]
+
+
+def _piped_get_url(video_id: str, video: bool = False) -> str:
+    """Get stream URL via Piped API"""
+    for api_base in _PIPED_APIS:
+        try:
+            LOGGER.info(f"Piped attempt: {api_base}")
+            with httpx.Client(timeout=15, follow_redirects=True) as client:
+                resp = client.get(f"{api_base}/streams/{video_id}")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if not video:
+                        # Get audio stream
+                        streams = data.get("audioStreams", [])
+                        if streams:
+                            # Sort by bitrate, pick best
+                            streams.sort(key=lambda x: x.get("bitrate", 0), reverse=True)
+                            url = streams[0].get("url")
+                            if url:
+                                LOGGER.info(f"Piped audio success from {api_base}")
+                                return url
+                    else:
+                        # Get video stream
+                        streams = data.get("videoStreams", [])
+                        # Filter <=720p with audio
+                        good = [s for s in streams if s.get("videoOnly") is False and (s.get("height", 9999) <= 720)]
+                        if not good:
+                            good = [s for s in streams if s.get("height", 9999) <= 720]
+                        if not good:
+                            good = streams
+                        if good:
+                            url = good[0].get("url")
+                            if url:
+                                LOGGER.info(f"Piped video success from {api_base}")
+                                return url
+                else:
+                    LOGGER.warning(f"Piped {api_base} HTTP {resp.status_code}")
+        except Exception as e:
+            LOGGER.warning(f"Piped {api_base} error: {str(e)[:60]}")
+        time.sleep(1)
+
+    return None
+
+
+# =====================================================
+# YT-DLP EXTRACTION — smart retry
+# =====================================================
+
+def _ytdlp_get_url(url: str, video: bool) -> str:
+    """Try yt-dlp with multiple player client strategies"""
+    for fmt_str, player_client, desc in _STRATEGIES:
+        LOGGER.info(f"yt-dlp strategy: {desc}")
+        opts = _base_opts()
+        opts["format"] = fmt_str
+        if player_client:
+            opts["extractor_args"] = {"youtube": {"player_client": player_client}}
+
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+
+                # Direct URL
+                stream_url = info.get("url")
+                if stream_url:
+                    LOGGER.info(f"yt-dlp success [{desc}]: format={info.get('format', '?')}")
+                    return stream_url
+
+                # Merged format
+                req_fmts = info.get("requested_formats")
+                if req_fmts:
+                    if not video:
+                        for f in req_fmts:
+                            if f.get("acodec") != "none" and f.get("url"):
+                                LOGGER.info(f"yt-dlp merged audio [{desc}]")
+                                return f["url"]
+                    # For video or fallback, return first with URL
+                    for f in req_fmts:
+                        if f.get("url"):
+                            LOGGER.info(f"yt-dlp merged [{desc}]")
+                            return f["url"]
+
+                LOGGER.warning(f"yt-dlp [{desc}]: extracted but no URL in result")
+
+        except Exception as e:
+            LOGGER.warning(f"yt-dlp [{desc}] failed: {str(e)[:80]}")
+
+        time.sleep(2)
+
+    return None
+
+
+def _ytdlp_download(url: str, video: bool) -> str:
+    """Download via yt-dlp as last resort"""
     suffix = "_v" if video else ""
     outtmpl = f"downloads/%(id)s{suffix}.%(ext)s"
+    all_exts = [".m4a", ".webm", ".opus", ".mp3", ".ogg", ".wav",
+                ".mp4", ".mkv", ".3gp", ".flv"]
 
-    for strat_idx, fmt in enumerate(strategies):
-        for pc_idx, player_client in enumerate(_PLAYER_CLIENTS[:4]):  # limit client retries for download
-            pc_name = str(player_client) if player_client else "default"
-            LOGGER.info(f"Download attempt: fmt={fmt[:30]}... client={pc_name}")
-            opts = _make_opts(fmt, player_client=player_client, download=True, outtmpl=outtmpl)
-            try:
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                    fname = ydl.prepare_filename(info)
+    # Only try the most reliable strategies for download
+    download_strats = [
+        ("bestaudio/best", ["android_vr"], "dl:android_vr"),
+        ("bestaudio/best", ["tv_embedded"], "dl:tv_embedded"),
+        ("best", ["android_vr"], "dl:android_vr+best"),
+        ("best", None, "dl:default"),
+    ]
 
-                    base = os.path.splitext(fname)[0]
-                    all_exts = [".m4a", ".webm", ".opus", ".mp3", ".ogg", ".wav",
-                                ".mp4", ".mkv", ".3gp", ".flv"]
+    for fmt_str, player_client, desc in download_strats:
+        LOGGER.info(f"Download strategy: {desc}")
+        opts = _base_opts()
+        opts["format"] = fmt_str
+        opts["outtmpl"] = outtmpl
+        if player_client:
+            opts["extractor_args"] = {"youtube": {"player_client": player_client}}
+
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                fname = ydl.prepare_filename(info)
+
+                base = os.path.splitext(fname)[0]
+                for ext in all_exts:
+                    if os.path.exists(base + ext):
+                        return base + ext
+                if os.path.exists(fname):
+                    return fname
+
+                vid_id = info.get("id", "")
+                if vid_id:
+                    prefix = f"downloads/{vid_id}{suffix}"
                     for ext in all_exts:
-                        if os.path.exists(base + ext):
-                            LOGGER.info(f"Downloaded: {base + ext}")
-                            return base + ext
+                        if os.path.exists(prefix + ext):
+                            return prefix + ext
 
-                    if os.path.exists(fname):
-                        LOGGER.info(f"Downloaded: {fname}")
-                        return fname
+        except Exception as e:
+            LOGGER.warning(f"Download [{desc}] failed: {str(e)[:80]}")
 
-                    # fallback: search by id
-                    vid_id = info.get("id", "")
-                    if vid_id:
-                        prefix = f"downloads/{vid_id}{suffix}"
-                        for ext in all_exts:
-                            if os.path.exists(prefix + ext):
-                                LOGGER.info(f"Downloaded (id match): {prefix + ext}")
-                                return prefix + ext
+        time.sleep(2)
 
-            except Exception as e:
-                LOGGER.warning(f"Download failed (fmt={strat_idx}, client={pc_name}): {str(e)[:80]}")
+    return None
 
-            time.sleep(2)
 
-    raise Exception("All download strategies exhausted. Try a different song.")
-
+# =====================================================
+# MAIN MEDIA GETTER — 4-layer fallback
+# =====================================================
 
 def get_media(url: str, video: bool):
-    """Try stream URL first, then download as fallback."""
-    # Method 1: Direct stream URL (fast, no download)
-    stream_url = get_stream_url(url, video)
-    if stream_url:
-        LOGGER.info("Using direct stream URL (no download needed)")
-        return stream_url
+    """
+    4-layer fallback system:
+      1. yt-dlp stream URL (multiple player clients)
+      2. Cobalt API (public instances)
+      3. Piped API (public instances)
+      4. yt-dlp download (file to disk)
+    """
+    # Extract video ID for API fallbacks
+    vid_match = re.search(r'(?:v=|/)([a-zA-Z0-9_-]{11})', url)
+    video_id = vid_match.group(1) if vid_match else None
 
-    # Method 2: Download fallback
-    LOGGER.info("Stream URL failed, falling back to download...")
+    # --- Layer 1: yt-dlp stream URL ---
+    LOGGER.info("Layer 1: yt-dlp stream URL")
+    result = _ytdlp_get_url(url, video)
+    if result:
+        LOGGER.info("Layer 1 SUCCESS")
+        return result
+
+    # --- Layer 2: Cobalt API ---
+    LOGGER.info("Layer 2: Cobalt API")
+    result = _cobalt_get_url(url, video)
+    if result:
+        LOGGER.info("Layer 2 SUCCESS (Cobalt)")
+        return result
+
+    # --- Layer 3: Piped API ---
+    if video_id:
+        LOGGER.info("Layer 3: Piped API")
+        result = _piped_get_url(video_id, video)
+        if result:
+            LOGGER.info("Layer 3 SUCCESS (Piped)")
+            return result
+
+    # --- Layer 4: yt-dlp download to disk ---
+    LOGGER.info("Layer 4: yt-dlp download")
     cleanup_downloads()
-    return download_media(url, video)
+    result = _ytdlp_download(url, video)
+    if result:
+        LOGGER.info("Layer 4 SUCCESS (downloaded)")
+        return result
+
+    raise Exception("All 4 layers failed. YouTube may be blocking. Try later.")
 
 
 # =====================================================
@@ -363,23 +479,22 @@ async def try_play_stream(chat_id, media_path, video, max_retries=4):
 
 
 # =====================================================
-# SECURITY: Input validation & rate limiting
+# SECURITY
 # =====================================================
 
 def _sanitize_query(text: str) -> str:
-    """Sanitize user input to prevent injection"""
-    # Remove any suspicious characters, keep only safe ones
+    """Sanitize user input"""
     text = text.strip()
-    # Limit length
     if len(text) > 200:
         text = text[:200]
-    # Remove null bytes and control characters
     text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+    # Block shell injection characters
+    text = re.sub(r'[;&|`$(){}]', '', text)
     return text
 
 
 def _check_rate_limit(user_id: int) -> bool:
-    """Returns True if user is rate-limited (should wait)"""
+    """Returns True if user should wait"""
     now = time.time()
     last = _USER_COOLDOWN.get(user_id, 0)
     if now - last < _COOLDOWN_SECONDS:
@@ -388,14 +503,15 @@ def _check_rate_limit(user_id: int) -> bool:
     return False
 
 
-def _is_valid_url(text: str) -> bool:
-    """Check if text is a valid YouTube URL"""
-    yt_patterns = [
-        r'https?://(www\.)?youtube\.com/watch\?v=[\w-]+',
-        r'https?://youtu\.be/[\w-]+',
-        r'https?://music\.youtube\.com/watch\?v=[\w-]+',
-    ]
-    return any(re.match(p, text) for p in yt_patterns)
+def _check_concurrent(chat_id: int) -> bool:
+    """Check if too many concurrent requests in this chat"""
+    now = time.time()
+    # Clean old entries
+    _GLOBAL_SPAM[chat_id] = [t for t in _GLOBAL_SPAM.get(chat_id, []) if now - t < 30]
+    if len(_GLOBAL_SPAM.get(chat_id, [])) >= _MAX_CONCURRENT:
+        return True
+    _GLOBAL_SPAM.setdefault(chat_id, []).append(now)
+    return False
 
 
 # =====================================================
@@ -403,19 +519,34 @@ def _is_valid_url(text: str) -> bool:
 # =====================================================
 
 async def _play(client, message: Message, video: bool):
-    """Main play function with retry, fallback, and security"""
+    """Main play handler with 4-layer fallback and security"""
     await safe_react(client, message, config.random_emoji())
     cmd = "vplay" if video else "play"
 
-    # Security: rate limiting
+    # Security: check if user is banned
+    try:
+        from MusicBangla.plugins.security import is_banned, is_url_blocked, log_action
+        if is_banned(message.from_user.id):
+            log_action(f"BLOCKED: banned user {message.from_user.id} tried /{cmd}")
+            return
+    except ImportError:
+        pass
+
+    # Security: rate limiting per user
     if _check_rate_limit(message.from_user.id):
         return await message.reply_text(
-            f"⏳ **অনুগ্রহ করে {_COOLDOWN_SECONDS} সেকেন্ড অপেক্ষা করুন।**"
+            f"⏳ <b>{_COOLDOWN_SECONDS} সেকেন্ড অপেক্ষা করুন।</b>"
+        )
+
+    # Security: anti-flood per chat
+    if _check_concurrent(message.chat.id):
+        return await message.reply_text(
+            "⏳ <b>একসাথে অনেক রিকোয়েস্ট!</b> কিছুক্ষণ পর চেষ্টা করুন।"
         )
 
     if len(message.command) < 2 and not message.reply_to_message:
         return await message.reply_text(
-            f"**গানের নাম দাও!**\n\nউদাহরণ: `/{cmd} tum hi ho`"
+            f"<b>গানের নাম দাও!</b>\n\nউদাহরণ: <code>/{cmd} tum hi ho</code>"
         )
 
     raw_query = (
@@ -424,12 +555,25 @@ async def _play(client, message: Message, video: bool):
         else (message.reply_to_message.text or "")
     )
 
-    # Security: sanitize input
     query = _sanitize_query(raw_query)
     if not query:
-        return await message.reply_text("**সঠিক গানের নাম দাও!**")
+        return await message.reply_text("<b>সঠিক গানের নাম দাও!</b>")
 
-    status = await message.reply_text("**খুঁজছি...**")
+    # Security: block URLs that aren't YouTube
+    if query.startswith("http"):
+        if not re.match(
+            r'https?://(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)/', query
+        ):
+            return await message.reply_text("<b>শুধু YouTube লিংক সমর্থিত!</b>")
+        # Check blocked URL patterns
+        try:
+            from MusicBangla.plugins.security import is_url_blocked
+            if is_url_blocked(query):
+                return await message.reply_text("🔒 <b>এই URL ব্লক করা হয়েছে।</b>")
+        except ImportError:
+            pass
+
+    status = await message.reply_text("🔎 <b>খুঁজছি...</b>")
 
     try:
         # Step 1: Search
@@ -441,23 +585,27 @@ async def _play(client, message: Message, video: bool):
                 timeout=15,
             )
         except asyncio.TimeoutError:
-            return await status.edit("Search timeout. Try again.")
+            return await status.edit("⏱ সার্চ টাইমআউট। আবার চেষ্টা করুন।")
         except Exception as e:
             LOGGER.error(f"Search failed: {e}")
-            return await status.edit(f"Search failed: `{str(e)[:80]}`")
+            return await status.edit(f"❌ সার্চ ব্যর্থ: <code>{str(e)[:80]}</code>")
 
         if not info:
             return await status.edit(
-                f"**'{query}'** not found.\nTry a different name."
+                f"❌ <b>'{query}'</b> খুঁজে পাওয়া যায়নি।\nঅন্য নাম দিয়ে চেষ্টা করুন।"
             )
 
-        # Step 2: Status update
+        # Security: block very long videos (>3 hours)
+        if info.get("duration", 0) > 10800:
+            return await status.edit("❌ <b>৩ ঘণ্টার বেশি লম্বা ভিডিও সমর্থিত নয়।</b>")
+
+        # Step 2: Status
         icon = "🎬" if video else "🎵"
         await status.edit(
-            f"📥 **মিডিয়া লোড হচ্ছে...**\n\n"
-            f"{icon} `{info['title'][:50]}`\n"
-            f"⏱ `{fmt_dur(info['duration'])}`\n\n"
-            f"⏳ অপেক্ষা করুন (retry সহ লোড হচ্ছে)..."
+            f"📥 <b>মিডিয়া লোড হচ্ছে...</b>\n\n"
+            f"{icon} <code>{info['title'][:50]}</code>\n"
+            f"⏱ <code>{fmt_dur(info['duration'])}</code>\n\n"
+            f"⏳ 4-layer fallback দিয়ে চেষ্টা করছি..."
         )
 
         # Step 3: Assistant + Media (parallel)
@@ -472,25 +620,25 @@ async def _play(client, message: Message, video: bool):
         if isinstance(assistant_ok, Exception) or assistant_ok is False:
             LOGGER.error(f"Assistant error: {assistant_ok}")
             return await status.edit(
-                "**Assistant গ্রুপে যোগ হতে পারেনি!**\n\n"
-                "Assistant অ্যাকাউন্ট manually গ্রুপে add করুন,\n"
-                "বটকে admin করুন, তারপর `/play` দিন।"
+                "❌ <b>Assistant গ্রুপে যোগ হতে পারেনি!</b>\n\n"
+                "🔧 Assistant অ্যাকাউন্ট manually গ্রুপে add করুন,\n"
+                "বটকে admin করুন, তারপর <code>/play</code> দিন।"
             )
 
         if isinstance(media_path, Exception):
             LOGGER.error(f"Media error: {media_path}")
             return await status.edit(
-                f"**ডাউনলোড ব্যর্থ!**\n`{str(media_path)[:100]}`\n\n"
-                f"আবার চেষ্টা করুন বা অন্য গান দিন।"
+                f"❌ <b>ডাউনলোড ব্যর্থ!</b>\n<code>{str(media_path)[:100]}</code>\n\n"
+                f"🔧 আবার চেষ্টা করুন বা অন্য গান দিন।"
             )
 
         if not media_path:
-            return await status.edit("মিডিয়া পাওয়া যায়নি। অন্য গান দিয়ে চেষ্টা করুন।")
+            return await status.edit("❌ মিডিয়া পাওয়া যায়নি। অন্য গান দিয়ে চেষ্টা করুন।")
 
         LOGGER.info(f"Media ready: {media_path}")
 
         # Step 4: Play with retry
-        await status.edit("🎶 **Voice Chat-এ যোগ হচ্ছে...**")
+        await status.edit("🎶 <b>Voice Chat-এ যোগ হচ্ছে...</b>")
         await asyncio.sleep(1)
 
         result = await try_play_stream(message.chat.id, str(media_path), video)
@@ -499,22 +647,23 @@ async def _play(client, message: Message, video: bool):
             ACTIVE_CHATS[message.chat.id] = info
         elif result == "NO_VC":
             return await status.edit(
-                "**Voice Chat চালু নেই!**\n\n"
-                "গ্রুপে Voice Chat শুরু করুন,\n"
-                "তারপর `/play` দিন।"
+                "❌ <b>Voice Chat চালু নেই!</b>\n\n"
+                "🔧 গ্রুপে Voice Chat শুরু করুন,\n"
+                "তারপর <code>/play</code> দিন।"
             )
         elif result == "NO_PERM":
             return await status.edit(
-                "**Permission নেই!**\n\n"
-                "Assistant-কে admin করুন\n"
+                "❌ <b>Permission নেই!</b>\n\n"
+                "🔧 Assistant-কে admin করুন\n"
                 "(Manage Voice Chats permission দিন)।"
             )
         else:
             return await status.edit(
-                f"**স্ট্রিমিং ব্যর্থ!**\n`{result}`\n\n`/stop` করে আবার `/play` দিন।"
+                f"❌ <b>স্ট্রিমিং ব্যর্থ!</b>\n<code>{result}</code>\n\n"
+                f"<code>/stop</code> করে আবার <code>/play</code> দিন।"
             )
 
-        # Step 5: Success message
+        # Step 5: Success
         try:
             await status.delete()
         except Exception:
@@ -522,13 +671,13 @@ async def _play(client, message: Message, video: bool):
 
         caption = (
             f"╭───❀ ✦ ❀───╮\n"
-            f"  {icon} **এখন {'ভিডিও' if video else 'গান'} বাজছে**\n"
+            f"  {icon} <b>এখন {'ভিডিও' if video else 'গান'} বাজছে</b>\n"
             f"╰───❀ ✦ ❀───╯\n\n"
-            f"🎵 **শিরোনাম:** {info['title']}\n"
-            f"⏱ **সময়:** `{fmt_dur(info['duration'])}`\n"
-            f"📺 **চ্যানেল:** {info['channel']}\n"
-            f"🙋 **অনুরোধকারী:** {message.from_user.mention}\n\n"
-            f"▫️ ⏸ `/pause` ▶️ `/resume` ⏭ `/skip` 🛑 `/stop`"
+            f"🎵 <b>শিরোনাম:</b> {info['title']}\n"
+            f"⏱ <b>সময়:</b> <code>{fmt_dur(info['duration'])}</code>\n"
+            f"📺 <b>চ্যানেল:</b> {info['channel']}\n"
+            f"🙋 <b>অনুরোধকারী:</b> {message.from_user.mention}\n\n"
+            f"▫️ ⏸ <code>/pause</code> ▶️ <code>/resume</code> ⏭ <code>/skip</code> 🛑 <code>/stop</code>"
         )
         try:
             await message.reply_photo(photo=info["thumb"], caption=caption)
@@ -546,7 +695,7 @@ async def _play(client, message: Message, video: bool):
         import traceback
         traceback.print_exc()
         try:
-            await status.edit(f"ত্রুটি: `{str(e)[:100]}`")
+            await status.edit(f"❌ ত্রুটি: <code>{str(e)[:100]}</code>")
         except Exception:
             pass
 

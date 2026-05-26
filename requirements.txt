@@ -2,7 +2,7 @@ pyrofork==2.3.21
 py-tgcalls==2.2.12
 ntgcalls
 tgcrypto
-yt-dlp
+yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/refs/heads/master.tar.gz
 youtube-search-python
 httpx<0.28
 motor
@@ -11,3 +11,4 @@ python-dotenv
 ffmpeg-python
 aiofiles
 aiohttp
+psutil
