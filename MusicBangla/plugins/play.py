@@ -84,7 +84,6 @@ def _base_opts():
         "no_check_formats": True,
         "check_formats": False,
         "source_address": "0.0.0.0",
-        "format_sort": ["abr", "asr"],
         "http_headers": {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -115,32 +114,20 @@ def cleanup_downloads():
 def _soundcloud_search_and_get(query: str, video: bool):
     """
     Search SoundCloud via yt-dlp scsearch and DOWNLOAD the file.
-    For video mode, downloads with video if available.
     """
     LOGGER.info(f"SoundCloud search: {query}")
     cleanup_downloads()
 
-    opts = _base_opts()
-    if video:
-        # SoundCloud rarely has video, but try best format
-        opts["format"] = "best"
-    else:
-        opts["format"] = "http_mp3_0_0/bestaudio/best"
-    opts["default_search"] = "scsearch3"  # Get 3 results for better matching
-    opts["outtmpl"] = "downloads/sc_%(id)s.%(ext)s"
-
-    if not video:
-        opts["postprocessors"] = [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "128",
-        }]
+    # Step 1: Search only (no download)
+    search_opts = _base_opts()
+    search_opts["default_search"] = "scsearch3"
+    search_opts["format"] = "best"
+    search_opts["extract_flat"] = False
 
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with yt_dlp.YoutubeDL(search_opts) as ydl:
             info = ydl.extract_info(f"scsearch3:{query}", download=False)
 
-            # scsearch returns a playlist with entries
             entries = []
             if info.get("_type") == "playlist" and info.get("entries"):
                 entries = list(info["entries"])
@@ -149,30 +136,31 @@ def _soundcloud_search_and_get(query: str, video: bool):
                 LOGGER.warning("SoundCloud: no results")
                 return None, None
 
-            # Pick best matching result
             best = _pick_best_match(entries, query)
             if not best:
                 best = entries[0]
-
-            # Now download the chosen track
-            LOGGER.info(f"SoundCloud: downloading '{best.get('title')}'")
-            dl_opts = _base_opts()
-            if video:
-                dl_opts["format"] = "best"
-            else:
-                dl_opts["format"] = "http_mp3_0_0/bestaudio/best"
-                dl_opts["postprocessors"] = [{
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "128",
-                }]
-            dl_opts["outtmpl"] = "downloads/sc_%(id)s.%(ext)s"
 
             webpage_url = best.get("webpage_url") or best.get("url")
             if not webpage_url:
                 return None, None
 
-            dl_info = ydl.extract_info(webpage_url, download=True)
+        # Step 2: Download with a NEW YoutubeDL instance
+        LOGGER.info(f"SoundCloud: downloading '{best.get('title')}'")
+        dl_opts = _base_opts()
+        dl_opts["outtmpl"] = "downloads/sc_%(id)s.%(ext)s"
+
+        if video:
+            dl_opts["format"] = "best"
+        else:
+            dl_opts["format"] = "http_mp3_0_0/bestaudio/best"
+            dl_opts["postprocessors"] = [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "128",
+            }]
+
+        with yt_dlp.YoutubeDL(dl_opts) as ydl2:
+            dl_info = ydl2.extract_info(webpage_url, download=True)
 
             title = dl_info.get("title", best.get("title", "Unknown"))
             duration = dl_info.get("duration", best.get("duration", 0))
@@ -180,13 +168,11 @@ def _soundcloud_search_and_get(query: str, video: bool):
             thumb = dl_info.get("thumbnail", best.get("thumbnail", ""))
             webpage = dl_info.get("webpage_url", webpage_url)
 
-            # Find the downloaded file
             track_id = dl_info.get("id", best.get("id", "unknown"))
-            local_path = _find_downloaded_file("sc_", track_id, ydl, dl_info)
+            local_path = _find_downloaded_file("sc_", track_id, ydl2, dl_info)
 
-            if local_path:
-                fsize = os.path.getsize(local_path)
-                LOGGER.info(f"SoundCloud OK: {title} -> {local_path} ({fsize} bytes)")
+            if local_path and os.path.getsize(local_path) > 1000:
+                LOGGER.info(f"SoundCloud OK: {title} -> {local_path} ({os.path.getsize(local_path)} bytes)")
                 return local_path, {
                     "title": title,
                     "duration": int(duration) if duration else 0,
@@ -196,8 +182,8 @@ def _soundcloud_search_and_get(query: str, video: bool):
                     "source": "SoundCloud",
                 }
 
-            LOGGER.warning("SoundCloud: download succeeded but file not found")
-            return None, None
+        LOGGER.warning("SoundCloud: download succeeded but file not found or too small")
+        return None, None
 
     except Exception as e:
         LOGGER.error(f"SoundCloud error: {e}")
@@ -218,11 +204,8 @@ def _pick_best_match(entries, query):
             continue
 
         title_words = set(title.split())
-        # Word overlap score
         overlap = len(query_words & title_words)
-        # Bonus if query is substring of title or vice versa
         substring_bonus = 2 if query_lower in title or title in query_lower else 0
-        # Penalty for very short or very long titles compared to query
         len_penalty = abs(len(title) - len(query_lower)) / max(len(query_lower), 1)
         score = overlap + substring_bonus - (len_penalty * 0.1)
 
@@ -252,11 +235,12 @@ def _find_downloaded_file(prefix, track_id, ydl=None, info=None):
         except Exception:
             pass
 
-    # Last resort: any file with prefix
+    # Last resort: any recent file with prefix
     try:
-        for f in sorted(os.listdir("downloads"), key=lambda x: os.path.getmtime(os.path.join("downloads", x)), reverse=True):
-            if f.startswith(prefix):
-                return os.path.join("downloads", f)
+        files = [f for f in os.listdir("downloads") if f.startswith(prefix)]
+        if files:
+            files.sort(key=lambda x: os.path.getmtime(os.path.join("downloads", x)), reverse=True)
+            return os.path.join("downloads", files[0])
     except Exception:
         pass
 
@@ -264,12 +248,12 @@ def _find_downloaded_file(prefix, track_id, ydl=None, info=None):
 
 
 # =====================================================
-# SOURCE 2: JIOSAAVN API (Secondary — Indian music)
+# SOURCE 2: JIOSAAVN API (Secondary — Indian/Bangla music)
 # =====================================================
 
 _JIOSAAVN_APIS = [
-    "https://jiosaavn-api.vercel.app",
-    "https://jiosaavn-api-v3.vercel.app",
+    "https://saavn.dev/api",
+    "https://jiosaavn-api-privatecvc2.vercel.app",
 ]
 
 
@@ -280,67 +264,117 @@ def _jiosaavn_search_and_get(query: str, video: bool):
     for api_base in _JIOSAAVN_APIS:
         try:
             with httpx.Client(timeout=15, follow_redirects=True) as client:
-                resp = client.get(f"{api_base}/search", params={"query": query})
+                # Search endpoint
+                resp = client.get(
+                    f"{api_base}/search/songs",
+                    params={"query": query, "limit": 3}
+                )
                 if resp.status_code != 200:
+                    LOGGER.warning(f"JioSaavn {api_base} search HTTP {resp.status_code}")
                     continue
 
                 data = resp.json()
-                results = data.get("results", data.get("data", []))
+
+                # Handle different API response formats
+                results = (
+                    data.get("data", {}).get("results", [])
+                    or data.get("results", [])
+                    or data.get("data", [])
+                )
                 if not results or not isinstance(results, list):
+                    LOGGER.warning(f"JioSaavn {api_base}: no results")
                     continue
 
                 song = results[0]
+                title = song.get("name") or song.get("title") or "Unknown"
                 song_id = song.get("id", "")
-                title = song.get("title", song.get("name", "Unknown"))
-                if not song_id:
-                    continue
 
-                resp2 = client.get(f"{api_base}/song", params={"id": song_id})
-                if resp2.status_code != 200:
-                    continue
-
-                song_data = resp2.json()
-                media_urls = song_data.get("media_urls", {})
+                # Try to get download URLs from search result directly
+                download_urls = song.get("downloadUrl") or song.get("download_url") or []
                 stream_url = None
-                for quality in ["320_KBPS", "160_KBPS", "96_KBPS"]:
-                    if media_urls.get(quality):
-                        stream_url = media_urls[quality]
-                        break
+
+                if isinstance(download_urls, list) and download_urls:
+                    # Pick highest quality
+                    for item in reversed(download_urls):
+                        if isinstance(item, dict) and item.get("url"):
+                            stream_url = item["url"]
+                            break
+                        elif isinstance(item, str):
+                            stream_url = item
+                            break
+                elif isinstance(download_urls, str) and download_urls:
+                    stream_url = download_urls
+
+                # If no download URL from search, try song detail endpoint
+                if not stream_url and song_id:
+                    try:
+                        resp2 = client.get(f"{api_base}/songs/{song_id}")
+                        if resp2.status_code == 200:
+                            song_detail = resp2.json()
+                            sd = song_detail.get("data", [])
+                            if isinstance(sd, list) and sd:
+                                sd = sd[0]
+                            elif isinstance(sd, dict):
+                                pass
+                            else:
+                                sd = song_detail
+
+                            dl_urls = sd.get("downloadUrl") or sd.get("download_url") or []
+                            if isinstance(dl_urls, list):
+                                for item in reversed(dl_urls):
+                                    if isinstance(item, dict) and item.get("url"):
+                                        stream_url = item["url"]
+                                        break
+                            elif isinstance(dl_urls, str):
+                                stream_url = dl_urls
+                    except Exception as e:
+                        LOGGER.warning(f"JioSaavn detail error: {str(e)[:60]}")
+
                 if not stream_url:
-                    stream_url = song_data.get("media_url", "")
-                if not stream_url:
+                    LOGGER.warning(f"JioSaavn {api_base}: no stream URL")
                     continue
 
-                duration_str = song_data.get("duration", song_data.get("more_info", {}).get("duration", "0"))
-                try:
-                    duration = int(duration_str)
-                except (ValueError, TypeError):
-                    duration = 0
+                # Parse metadata
+                duration = 0
+                dur_raw = song.get("duration")
+                if dur_raw:
+                    try:
+                        duration = int(dur_raw)
+                    except (ValueError, TypeError):
+                        pass
 
                 artist = (
-                    song_data.get("more_info", {}).get("singers", "")
-                    or song_data.get("subtitle", "")
-                    or "JioSaavn"
-                )
-                image = song_data.get("image", "")
-                if isinstance(image, list) and image:
-                    image = image[-1].get("link", "") if isinstance(image[-1], dict) else image[-1]
+                    song.get("artists", {}).get("primary", [{}])[0].get("name", "")
+                    if isinstance(song.get("artists"), dict) else ""
+                ) or song.get("primaryArtists", "") or song.get("subtitle", "") or "JioSaavn"
 
-                local_path = f"downloads/jiosaavn_{song_id}.mp4"
+                # Get thumbnail
+                image = song.get("image") or []
+                thumb = ""
+                if isinstance(image, list) and image:
+                    last_img = image[-1]
+                    thumb = last_img.get("url", "") if isinstance(last_img, dict) else str(last_img)
+                elif isinstance(image, str):
+                    thumb = image
+
+                # Download the audio
+                local_path = f"downloads/jiosaavn_{song_id or 'unknown'}.mp4"
                 try:
                     dl_resp = client.get(stream_url, timeout=30)
-                    if dl_resp.status_code == 200 and len(dl_resp.content) > 1000:
+                    if dl_resp.status_code == 200 and len(dl_resp.content) > 5000:
                         with open(local_path, "wb") as f:
                             f.write(dl_resp.content)
                         LOGGER.info(f"JioSaavn OK: {title} ({len(dl_resp.content)} bytes)")
                         return local_path, {
                             "title": title,
                             "duration": duration,
-                            "channel": artist,
-                            "thumb": image,
-                            "link": song_data.get("perma_url", ""),
+                            "channel": artist if isinstance(artist, str) else str(artist),
+                            "thumb": thumb,
+                            "link": song.get("url") or song.get("perma_url") or "",
                             "source": "JioSaavn",
                         }
+                    else:
+                        LOGGER.warning(f"JioSaavn download: HTTP {dl_resp.status_code}, size {len(dl_resp.content)}")
                 except Exception as e:
                     LOGGER.warning(f"JioSaavn download error: {str(e)[:60]}")
 
@@ -351,47 +385,61 @@ def _jiosaavn_search_and_get(query: str, video: bool):
 
 
 # =====================================================
-# SOURCE 3: YOUTUBE (Fallback)
+# SOURCE 3: YOUTUBE (Fallback — via yt-dlp search)
 # =====================================================
 
 _YT_STRATEGIES = [
-    ("bestaudio/best", ["web_creator"], "yt:web_creator"),
+    ("bestaudio[ext=m4a]/bestaudio/best", ["web_creator"], "yt:web_creator"),
     ("bestaudio/best", ["mweb"], "yt:mweb"),
     ("bestaudio/best", ["ios"], "yt:ios"),
     ("bestaudio/best", None, "yt:default"),
 ]
 
+_YT_VIDEO_STRATEGIES = [
+    ("best[height<=720]/best", ["web_creator"], "yt-v:web_creator"),
+    ("best[height<=720]/best", ["mweb"], "yt-v:mweb"),
+    ("best[height<=720]/best", None, "yt-v:default"),
+]
+
 
 def _youtube_search_sync(query: str):
+    """Search YouTube using yt-dlp's built-in search (no external lib needed)."""
     try:
-        from youtubesearchpython import VideosSearch
-        search = VideosSearch(query, limit=1)
-        result = search.result()
-        if not result or not result.get("result"):
-            return None
-        video = result["result"][0]
-        vid = video.get("id")
-        title = video.get("title", "Unknown")
-        dur_text = video.get("duration", "0:00")
-        dur_parts = str(dur_text).split(":")
-        try:
-            if len(dur_parts) == 3:
-                duration = int(dur_parts[0]) * 3600 + int(dur_parts[1]) * 60 + int(dur_parts[2])
-            elif len(dur_parts) == 2:
-                duration = int(dur_parts[0]) * 60 + int(dur_parts[1])
-            else:
-                duration = 0
-        except Exception:
-            duration = 0
-        thumbs = video.get("thumbnails")
-        thumb = thumbs[-1]["url"] if thumbs else f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
-        channel = video.get("channel", {}).get("name", "YouTube")
-        return {
-            "title": title, "duration": duration,
-            "link": f"https://www.youtube.com/watch?v={vid}",
-            "thumb": thumb, "channel": channel, "id": vid,
-            "source": "YouTube",
-        }
+        opts = _base_opts()
+        opts["default_search"] = "ytsearch1"
+        opts["extract_flat"] = False
+        opts["format"] = "best"
+        if _COOKIE_FILE:
+            opts["cookiefile"] = _COOKIE_FILE
+
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(f"ytsearch1:{query}", download=False)
+
+            entries = []
+            if info.get("_type") == "playlist" and info.get("entries"):
+                entries = list(info["entries"])
+            elif info.get("id"):
+                entries = [info]
+
+            if not entries:
+                return None
+
+            video = entries[0]
+            vid = video.get("id", "")
+            title = video.get("title", "Unknown")
+            duration = video.get("duration", 0) or 0
+            thumb = video.get("thumbnail", "") or f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
+            channel = video.get("channel", "") or video.get("uploader", "YouTube")
+
+            return {
+                "title": title,
+                "duration": int(duration),
+                "link": f"https://www.youtube.com/watch?v={vid}",
+                "thumb": thumb,
+                "channel": channel,
+                "id": vid,
+                "source": "YouTube",
+            }
     except Exception as e:
         LOGGER.error(f"YT search error: {e}")
         return None
@@ -401,9 +449,10 @@ def _youtube_download(url: str, video: bool) -> str:
     cleanup_downloads()
     suffix = "_v" if video else ""
     outtmpl = f"downloads/yt_%(id)s{suffix}.%(ext)s"
-    all_exts = [".m4a", ".webm", ".opus", ".mp3", ".ogg", ".mp4"]
 
-    for fmt_str, player_client, desc in _YT_STRATEGIES[:3]:
+    strategies = _YT_VIDEO_STRATEGIES if video else _YT_STRATEGIES
+
+    for fmt_str, player_client, desc in strategies:
         opts = _base_opts()
         opts["format"] = fmt_str
         opts["outtmpl"] = outtmpl
@@ -411,21 +460,91 @@ def _youtube_download(url: str, video: bool) -> str:
             opts["cookiefile"] = _COOKIE_FILE
         if player_client:
             opts["extractor_args"] = {"youtube": {"player_client": player_client}}
+
+        if not video:
+            opts["postprocessors"] = [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "m4a",
+                "preferredquality": "128",
+            }]
+
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 fname = ydl.prepare_filename(info)
                 base = os.path.splitext(fname)[0]
-                for ext in all_exts:
+                for ext in [".m4a", ".mp3", ".webm", ".opus", ".ogg", ".mp4", ".mkv"]:
                     if os.path.exists(base + ext):
-                        return base + ext
-                if os.path.exists(fname):
+                        fpath = base + ext
+                        if os.path.getsize(fpath) > 1000:
+                            LOGGER.info(f"YT download OK [{desc}]: {fpath}")
+                            return fpath
+                if os.path.exists(fname) and os.path.getsize(fname) > 1000:
                     return fname
         except Exception as e:
-            LOGGER.warning(f"YT download [{desc}]: {str(e)[:60]}")
+            LOGGER.warning(f"YT download [{desc}]: {str(e)[:80]}")
         time.sleep(1)
 
     return None
+
+
+# =====================================================
+# SPOTIFY / APPLE MUSIC URL -> extract song name
+# =====================================================
+
+def _extract_song_from_url(url: str) -> str:
+    """
+    For Spotify/Apple Music/other streaming URLs,
+    extract song info via yt-dlp or page title, then search by name.
+    """
+    try:
+        opts = _base_opts()
+        opts["extract_flat"] = True
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            title = info.get("title") or info.get("track") or ""
+            artist = info.get("artist") or info.get("uploader") or ""
+            if title:
+                return f"{artist} {title}".strip() if artist else title
+    except Exception as e:
+        LOGGER.warning(f"URL extract error: {str(e)[:60]}")
+
+    # Fallback: try to get page title via HTTP
+    try:
+        with httpx.Client(timeout=10, follow_redirects=True) as client:
+            resp = client.get(url)
+            if resp.status_code == 200:
+                import html
+                match = re.search(r'<title[^>]*>([^<]+)</title>', resp.text, re.IGNORECASE)
+                if match:
+                    raw_title = html.unescape(match.group(1))
+                    # Clean common suffixes
+                    for suffix in [" - Spotify", " on Apple Music", " | Spotify",
+                                   " - song and lyrics", " - JioSaavn", " - Gaana"]:
+                        raw_title = raw_title.replace(suffix, "")
+                    return raw_title.strip()
+    except Exception:
+        pass
+
+    return ""
+
+
+def _is_streaming_url(url: str) -> str:
+    """Check if URL is from a known streaming service. Returns service name or empty."""
+    patterns = {
+        "Spotify": r'https?://(open\.)?spotify\.com/',
+        "Apple Music": r'https?://music\.apple\.com/',
+        "JioSaavn": r'https?://(www\.)?jiosaavn\.com/',
+        "Gaana": r'https?://(www\.)?gaana\.com/',
+        "Wynk": r'https?://(www\.)?wynk\.in/',
+        "Deezer": r'https?://(www\.)?deezer\.com/',
+        "Tidal": r'https?://(www\.)?tidal\.com/',
+        "SoundCloud": r'https?://(www\.|m\.)?soundcloud\.com/',
+    }
+    for name, pattern in patterns.items():
+        if re.match(pattern, url, re.IGNORECASE):
+            return name
+    return ""
 
 
 # =====================================================
@@ -533,7 +652,7 @@ async def try_play_stream(chat_id, media_path, video, max_retries=4):
     for attempt in range(1, max_retries + 1):
         try:
             await calls.play(chat_id, stream)
-            LOGGER.info(f"Playing in {chat_id}")
+            LOGGER.info(f"Playing in {chat_id} (attempt {attempt})")
             return True
         except Exception as e:
             last_error = e
@@ -558,14 +677,12 @@ async def try_play_stream(chat_id, media_path, video, max_retries=4):
 # QUEUE: auto-play next song when current ends
 # =====================================================
 
-@calls.on_stream_end()
-async def _on_stream_end(client, update):
-    """Auto-play next song from queue when current one ends."""
-    chat_id = update.chat_id
-    LOGGER.info(f"Stream ended in {chat_id}")
+async def play_next_in_queue(chat_id: int):
+    """Play next song from queue. Called by on_stream_end and skip."""
+    LOGGER.info(f"play_next_in_queue for {chat_id}")
 
-    # Clean up current song's file
-    current = ACTIVE_CHATS.pop(chat_id, None)
+    # Clean up current
+    ACTIVE_CHATS.pop(chat_id, None)
 
     # Check queue
     if chat_id not in QUEUES or not QUEUES[chat_id]:
@@ -604,8 +721,9 @@ async def _on_stream_end(client, update):
         if not media_path:
             if status:
                 await status.edit("❌ পরবর্তী গান পাওয়া যায়নি।")
-            # Try next in queue
-            asyncio.create_task(_try_next_in_queue(chat_id))
+            # Try next in queue after a delay
+            await asyncio.sleep(2)
+            await play_next_in_queue(chat_id)
             return
 
         result = await try_play_stream(chat_id, str(media_path), next_video)
@@ -646,7 +764,8 @@ async def _on_stream_end(client, update):
         else:
             if status:
                 await status.edit(f"❌ পরবর্তী গান চালানো যায়নি: {result}")
-            asyncio.create_task(_try_next_in_queue(chat_id))
+            await asyncio.sleep(2)
+            await play_next_in_queue(chat_id)
 
     except Exception as e:
         LOGGER.error(f"Auto-play error: {e}")
@@ -655,23 +774,16 @@ async def _on_stream_end(client, update):
                 await status.edit(f"❌ ত্রুটি: <code>{str(e)[:80]}</code>")
             except Exception:
                 pass
-        asyncio.create_task(_try_next_in_queue(chat_id))
+        await asyncio.sleep(2)
+        await play_next_in_queue(chat_id)
 
 
-async def _try_next_in_queue(chat_id):
-    """Skip to next song if current fails."""
-    await asyncio.sleep(2)
-    if chat_id in QUEUES and QUEUES[chat_id]:
-        # Simulate stream end to trigger next
-        class FakeUpdate:
-            def __init__(self, cid):
-                self.chat_id = cid
-        await _on_stream_end(None, FakeUpdate(chat_id))
-    else:
-        try:
-            await calls.leave_call(chat_id)
-        except Exception:
-            pass
+@calls.on_stream_end()
+async def _on_stream_end(client, update):
+    """Auto-play next song from queue when current one ends."""
+    chat_id = update.chat_id
+    LOGGER.info(f"Stream ended in {chat_id}")
+    await play_next_in_queue(chat_id)
 
 
 # =====================================================
@@ -735,6 +847,7 @@ async def _play(client, message: Message, video: bool):
         return await message.reply_text(
             f"<b>গানের নাম দাও!</b>\n\n"
             f"উদাহরণ: <code>/{cmd} tum hi ho</code>\n"
+            f"Spotify/Apple Music লিংকও চলবে!\n"
             f"কিউ দেখতে: <code>/queue</code>"
         )
 
@@ -748,15 +861,23 @@ async def _play(client, message: Message, video: bool):
     if not query:
         return await message.reply_text("<b>সঠিক গানের নাম দাও!</b>")
 
-    # Allow YouTube URLs as direct input
+    # Handle URLs
     is_yt_url = False
+    streaming_service = ""
+
     if query.startswith("http"):
-        if re.match(
-            r'https?://(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)/', query
-        ):
+        # Check YouTube
+        if re.match(r'https?://(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)/', query):
             is_yt_url = True
         else:
-            return await message.reply_text("<b>শুধু YouTube লিংক বা গানের নাম দাও!</b>")
+            # Check streaming services (Spotify, Apple Music, JioSaavn, etc.)
+            streaming_service = _is_streaming_url(query)
+            if not streaming_service:
+                return await message.reply_text(
+                    "<b>এই URL সাপোর্টেড নয়!</b>\n\n"
+                    "সাপোর্টেড: YouTube, Spotify, Apple Music, JioSaavn, Gaana, SoundCloud, Deezer"
+                )
+
         try:
             from MusicBangla.plugins.security import is_url_blocked
             if is_url_blocked(query):
@@ -804,10 +925,52 @@ async def _play(client, message: Message, video: bool):
                 "Assistant manually গ্রুপে add করুন।"
             )
 
-        # For YouTube URL, try YouTube first then fallback
         search_query = query
+
+        # For Spotify/Apple Music/etc URLs, extract song name
+        if streaming_service:
+            await status.edit(
+                f"<b>{streaming_service} লিংক থেকে গান খুঁজছি...</b>"
+            )
+            extracted = await loop.run_in_executor(None, _extract_song_from_url, query)
+            if extracted:
+                search_query = extracted
+                LOGGER.info(f"{streaming_service} URL -> search query: {search_query}")
+            else:
+                return await status.edit(
+                    f"<b>{streaming_service} লিংক থেকে গানের তথ্য পাওয়া যায়নি!</b>\n"
+                    "গানের নাম দিয়ে চেষ্টা করুন।"
+                )
+
+        # For YouTube URL, try to get the title for better search
         if is_yt_url:
             await status.edit("<b>YouTube লিংক থেকে লোড হচ্ছে...</b>")
+            # Try direct YouTube download first
+            yt_path = await loop.run_in_executor(None, _youtube_download, query, video)
+            if yt_path:
+                # Get info for display
+                yt_info = await loop.run_in_executor(None, _youtube_search_sync,
+                    query.split("?v=")[-1].split("&")[0] if "v=" in query else query)
+                if not yt_info:
+                    yt_info = {"title": "YouTube", "duration": 0, "channel": "YouTube",
+                               "thumb": "", "link": query, "source": "YouTube"}
+
+                await status.edit("🎶 <b>Voice Chat-এ যোগ হচ্ছে...</b>")
+                await asyncio.sleep(1)
+
+                result = await try_play_stream(chat_id, str(yt_path), video)
+
+                if result is True:
+                    ACTIVE_CHATS[chat_id] = yt_info
+                    try:
+                        await status.delete()
+                    except Exception:
+                        pass
+                    _send_now_playing(message, yt_info, video, requester)
+                    return
+                # If direct download failed, fall through to normal search
+
+            # Extract title for search
             yt_info = await loop.run_in_executor(None, _youtube_search_sync,
                 query.split("?v=")[-1].split("&")[0] if "v=" in query else query)
             if yt_info:
@@ -837,7 +1000,6 @@ async def _play(client, message: Message, video: bool):
 
         # Play
         source_name = info.get("source", "?")
-        icon = "🎬" if video else "🎵"
         await status.edit(
             f"🎶 <b>Voice Chat-এ যোগ হচ্ছে...</b>\n📡 {source_name}"
         )
@@ -868,6 +1030,7 @@ async def _play(client, message: Message, video: bool):
         except Exception:
             pass
 
+        icon = "🎬" if video else "🎵"
         caption = (
             f"╭───❀ ✦ ❀───╮\n"
             f"  {icon} <b>এখন {'ভিডিও' if video else 'গান'} বাজছে</b>\n"

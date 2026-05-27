@@ -1,8 +1,9 @@
+import asyncio
 from pyrogram import filters
 from pyrogram.types import Message
 
 from MusicBangla import app, calls, LOGGER
-from MusicBangla.plugins.play import ACTIVE_CHATS, QUEUES
+from MusicBangla.plugins.play import ACTIVE_CHATS, QUEUES, play_next_in_queue
 
 
 async def react(client, message, emoji):
@@ -36,22 +37,28 @@ async def resume_cmd(client, message: Message):
 
 @app.on_message(filters.command(["skip", "next"]) & filters.group)
 async def skip_cmd(client, message: Message):
-    """Skip current song — auto-plays next from queue via on_stream_end."""
+    """Skip current song — explicitly plays next from queue."""
     await react(client, message, "⏭")
     chat_id = message.chat.id
     queue = QUEUES.get(chat_id, [])
 
     try:
-        # Leave call triggers on_stream_end which auto-plays next
-        ACTIVE_CHATS.pop(chat_id, None)
-        await calls.leave_call(chat_id)
+        # First try to leave the current call cleanly
+        try:
+            await calls.leave_call(chat_id)
+        except Exception:
+            pass
 
         if queue:
             await message.reply_text(
                 f"⏭ <b>স্কিপ!</b> পরবর্তী গান লোড হচ্ছে...\n"
                 f"📋 কিউতে বাকি: {len(queue)} টি"
             )
+            # Explicitly trigger next song (don't rely on on_stream_end)
+            await asyncio.sleep(1)
+            await play_next_in_queue(chat_id)
         else:
+            ACTIVE_CHATS.pop(chat_id, None)
             await message.reply_text(
                 "⏭ <b>গান স্কিপ করা হলো।</b>\n"
                 "কিউ খালি। নতুন গান: <code>/play</code>"
@@ -72,7 +79,10 @@ async def stop_cmd(client, message: Message):
         # Clear queue so on_stream_end doesn't auto-play
         if chat_id in QUEUES:
             QUEUES[chat_id].clear()
-        await calls.leave_call(chat_id)
+        try:
+            await calls.leave_call(chat_id)
+        except Exception:
+            pass
         await message.reply_text(
             "🛑 <b>স্ট্রিম বন্ধ ও কিউ পরিষ্কার।</b>\n"
             "ধন্যবাদ গান উপভোগ করার জন্য 💝"
