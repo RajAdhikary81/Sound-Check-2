@@ -2,7 +2,7 @@ from pyrogram import filters
 from pyrogram.types import Message
 
 from MusicBangla import app, calls, LOGGER
-from MusicBangla.plugins.play import ACTIVE_CHATS
+from MusicBangla.plugins.play import ACTIVE_CHATS, QUEUES
 
 
 async def react(client, message, emoji):
@@ -36,11 +36,26 @@ async def resume_cmd(client, message: Message):
 
 @app.on_message(filters.command(["skip", "next"]) & filters.group)
 async def skip_cmd(client, message: Message):
+    """Skip current song — auto-plays next from queue via on_stream_end."""
     await react(client, message, "⏭")
+    chat_id = message.chat.id
+    queue = QUEUES.get(chat_id, [])
+
     try:
-        await calls.leave_call(message.chat.id)
-        ACTIVE_CHATS.pop(message.chat.id, None)
-        await message.reply_text("⏭ <b>গান স্কিপ করা হলো।</b>\n\nনতুন গান চালাতে <code>/play</code> দাও।")
+        # Leave call triggers on_stream_end which auto-plays next
+        ACTIVE_CHATS.pop(chat_id, None)
+        await calls.leave_call(chat_id)
+
+        if queue:
+            await message.reply_text(
+                f"⏭ <b>স্কিপ!</b> পরবর্তী গান লোড হচ্ছে...\n"
+                f"📋 কিউতে বাকি: {len(queue)} টি"
+            )
+        else:
+            await message.reply_text(
+                "⏭ <b>গান স্কিপ করা হলো।</b>\n"
+                "কিউ খালি। নতুন গান: <code>/play</code>"
+            )
     except Exception as e:
         LOGGER.error(e)
         await message.reply_text("❌ স্কিপ করা যাচ্ছে না।")
@@ -48,11 +63,20 @@ async def skip_cmd(client, message: Message):
 
 @app.on_message(filters.command(["stop", "end"]) & filters.group)
 async def stop_cmd(client, message: Message):
+    """Stop playback and clear queue."""
     await react(client, message, "🛑")
+    chat_id = message.chat.id
+
     try:
-        await calls.leave_call(message.chat.id)
-        ACTIVE_CHATS.pop(message.chat.id, None)
-        await message.reply_text("🛑 <b>স্ট্রিম বন্ধ করা হলো।</b>\n\nধন্যবাদ গান উপভোগ করার জন্য 💝")
+        ACTIVE_CHATS.pop(chat_id, None)
+        # Clear queue so on_stream_end doesn't auto-play
+        if chat_id in QUEUES:
+            QUEUES[chat_id].clear()
+        await calls.leave_call(chat_id)
+        await message.reply_text(
+            "🛑 <b>স্ট্রিম বন্ধ ও কিউ পরিষ্কার।</b>\n"
+            "ধন্যবাদ গান উপভোগ করার জন্য 💝"
+        )
     except Exception as e:
         LOGGER.error(e)
         await message.reply_text("❌ স্টপ করা যাচ্ছে না।")
