@@ -116,10 +116,7 @@ def cleanup_downloads():
 # =====================================================
 
 def _play_buttons(song_link: str = "") -> InlineKeyboardMarkup:
-    """Build inline buttons for the now-playing message."""
     rows = []
-
-    # Row 1: Song link (if available) + Support
     row1 = []
     if song_link and song_link.startswith("http"):
         row1.append(InlineKeyboardButton("🔗 গান দেখো", url=song_link))
@@ -130,14 +127,10 @@ def _play_buttons(song_link: str = "") -> InlineKeyboardMarkup:
         )
     )
     rows.append(row1)
-
-    # Row 2: Support group & channel
     rows.append([
         InlineKeyboardButton("📢 চ্যানেল", url=config.SUPPORT_CHANNEL),
         InlineKeyboardButton("💬 সাপোর্ট", url=config.SUPPORT_GROUP),
     ])
-
-    # Row 3: Owner & close
     rows.append([
         InlineKeyboardButton(
             "👨‍💻 মালিক",
@@ -145,139 +138,15 @@ def _play_buttons(song_link: str = "") -> InlineKeyboardMarkup:
         ),
         InlineKeyboardButton("❌ বন্ধ করো", callback_data="close_play_msg"),
     ])
-
     return InlineKeyboardMarkup(rows)
 
 
 # =====================================================
-# SOURCE 1: SOUNDCLOUD (Primary — most reliable)
+# FIND DOWNLOADED FILE HELPER
 # =====================================================
 
-def _soundcloud_search_and_get(query: str, video: bool):
-    """Search SoundCloud via yt-dlp and download."""
-    LOGGER.info(f"SoundCloud search: {query}")
-    cleanup_downloads()
-
-    try:
-        # Search + download in one step (simpler = more reliable)
-        dl_opts = _base_opts()
-        dl_opts["outtmpl"] = "downloads/sc_%(id)s.%(ext)s"
-        dl_opts["format"] = "best"  # simple — let yt-dlp pick
-        dl_opts["default_search"] = "scsearch"
-        # NO postprocessors — raw download only
-
-        with yt_dlp.YoutubeDL(dl_opts) as ydl:
-            info = ydl.extract_info(f"scsearch3:{query}", download=False)
-
-            entries = []
-            if info.get("_type") == "playlist" and info.get("entries"):
-                entries = list(info["entries"])
-
-            if not entries:
-                LOGGER.warning("SoundCloud: no results")
-                return None, None
-
-            best = _pick_best_match(entries, query)
-            if not best:
-                best = entries[0]
-
-            webpage_url = best.get("webpage_url") or best.get("url")
-            if not webpage_url:
-                return None, None
-
-        # Download separately with clean instance
-        LOGGER.info(f"SoundCloud: downloading '{best.get('title')}'")
-        dl_opts2 = _base_opts()
-        dl_opts2["outtmpl"] = "downloads/sc_%(id)s.%(ext)s"
-        dl_opts2["format"] = "best"
-
-        with yt_dlp.YoutubeDL(dl_opts2) as ydl2:
-            dl_info = ydl2.extract_info(webpage_url, download=True)
-
-            title = dl_info.get("title", best.get("title", "Unknown"))
-            duration = dl_info.get("duration", best.get("duration", 0))
-            uploader = dl_info.get("uploader", best.get("uploader", "SoundCloud"))
-            thumb = dl_info.get("thumbnail", best.get("thumbnail", ""))
-            webpage = dl_info.get("webpage_url", webpage_url)
-
-            track_id = dl_info.get("id", best.get("id", "unknown"))
-            local_path = _find_downloaded_file("sc_", track_id, ydl2, dl_info)
-
-            if local_path and os.path.getsize(local_path) > 5000:
-                fsize = os.path.getsize(local_path)
-                LOGGER.info(f"SoundCloud OK: {title} -> {local_path} ({fsize} bytes)")
-                return local_path, {
-                    "title": title,
-                    "duration": int(duration) if duration else 0,
-                    "channel": uploader,
-                    "thumb": thumb,
-                    "link": webpage,
-                    "source": "SoundCloud",
-                }
-
-        LOGGER.warning("SoundCloud: file not found or too small")
-        return None, None
-
-    except Exception as e:
-        LOGGER.error(f"SoundCloud error: {e}")
-        return None, None
-
-
-def _pick_best_match(entries, query):
-    """Pick the entry whose title best matches the query.
-    Penalizes slowed/reverb/remix versions unless query asks for them."""
-    query_lower = query.lower().strip()
-    query_words = set(query_lower.split())
-
-    # Check if user specifically wants remix/slowed
-    wants_remix = any(w in query_lower for w in ["remix", "slowed", "reverb", "lofi", "lo-fi"])
-
-    best_entry = None
-    best_score = -999
-
-    for entry in entries:
-        title = (entry.get("title") or "").lower()
-        if not title:
-            continue
-
-        title_words = set(title.split())
-        # Word overlap score
-        overlap = len(query_words & title_words)
-        # Bonus if query is substring of title or vice versa
-        substring_bonus = 3 if query_lower in title else 0
-        substring_bonus += 2 if title in query_lower else 0
-
-        # Heavy penalty for slowed/reverb/remix unless user asked for it
-        bad_words = ["slowed", "reverb", "reverbed", "lofi", "lo-fi",
-                     "8d", "bass boosted", "nightcore"]
-        penalty = 0
-        if not wants_remix:
-            for bw in bad_words:
-                if bw in title and bw not in query_lower:
-                    penalty += 5
-
-        # Penalty for very different length
-        len_penalty = abs(len(title) - len(query_lower)) / max(len(query_lower), 1) * 0.3
-
-        # Bonus for having original/official in title
-        official_bonus = 1 if any(w in title for w in ["original", "official"]) else 0
-
-        # Duration penalty: skip very short clips (<60s)
-        dur = entry.get("duration", 0) or 0
-        short_penalty = 3 if dur and dur < 60 else 0
-
-        score = overlap + substring_bonus + official_bonus - penalty - len_penalty - short_penalty
-
-        if score > best_score:
-            best_score = score
-            best_entry = entry
-
-    return best_entry
-
-
 def _find_downloaded_file(prefix, track_id, ydl=None, info=None):
-    """Find downloaded file by prefix + id or ydl filename."""
-    for ext in [".m4a", ".mp3", ".webm", ".opus", ".ogg", ".wav", ".mp4", ".mkv"]:
+    for ext in [".m4a", ".mp3", ".webm", ".opus", ".ogg", ".wav", ".mp4", ".mkv", ".3gp"]:
         candidate = f"downloads/{prefix}{track_id}{ext}"
         if os.path.exists(candidate):
             return candidate
@@ -286,7 +155,7 @@ def _find_downloaded_file(prefix, track_id, ydl=None, info=None):
         try:
             fname = ydl.prepare_filename(info)
             base = os.path.splitext(fname)[0]
-            for ext in [".m4a", ".mp3", ".webm", ".opus", ".ogg", ".mp4"]:
+            for ext in [".m4a", ".mp3", ".webm", ".opus", ".ogg", ".mp4", ".mkv"]:
                 if os.path.exists(base + ext):
                     return base + ext
             if os.path.exists(fname):
@@ -294,7 +163,6 @@ def _find_downloaded_file(prefix, track_id, ydl=None, info=None):
         except Exception:
             pass
 
-    # Last resort: any recent file
     try:
         files = [f for f in os.listdir("downloads") if f.startswith(prefix)]
         if files:
@@ -310,11 +178,79 @@ def _find_downloaded_file(prefix, track_id, ydl=None, info=None):
 
 
 # =====================================================
-# SOURCE 2: YOUTUBE (with web/mweb/android clients)
+# SOURCE 1: SOUNDCLOUD (via yt-dlp — most reliable)
 # =====================================================
 
-def _youtube_search_sync(query: str):
-    """Search YouTube using yt-dlp flat search (doesn't need auth)."""
+def _soundcloud_search_and_download(query: str, video: bool):
+    """Search SoundCloud and download. No external APIs needed."""
+    LOGGER.info(f"SoundCloud search: {query}")
+    cleanup_downloads()
+
+    try:
+        opts = _base_opts()
+        opts["outtmpl"] = "downloads/sc_%(id)s.%(ext)s"
+        opts["format"] = "best"
+        # NO postprocessors — just download raw file
+
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(f"scsearch3:{query}", download=False)
+
+            entries = []
+            if info and info.get("_type") == "playlist" and info.get("entries"):
+                entries = list(info["entries"])
+
+            if not entries:
+                LOGGER.warning("SoundCloud: no search results")
+                return None, None
+
+            # Pick best match
+            best = _pick_best_match(entries, query) or entries[0]
+            webpage_url = best.get("webpage_url") or best.get("url")
+            if not webpage_url:
+                return None, None
+
+        # Download in a separate instance
+        LOGGER.info(f"SoundCloud: downloading '{best.get('title', '?')}'")
+        dl_opts = _base_opts()
+        dl_opts["outtmpl"] = "downloads/sc_%(id)s.%(ext)s"
+        dl_opts["format"] = "best"
+
+        with yt_dlp.YoutubeDL(dl_opts) as ydl2:
+            dl_info = ydl2.extract_info(webpage_url, download=True)
+
+            title = dl_info.get("title", best.get("title", "Unknown"))
+            duration = dl_info.get("duration", best.get("duration", 0))
+            uploader = dl_info.get("uploader", best.get("uploader", "SoundCloud"))
+            thumb = dl_info.get("thumbnail", best.get("thumbnail", ""))
+            webpage = dl_info.get("webpage_url", webpage_url)
+            track_id = dl_info.get("id", best.get("id", "unknown"))
+
+            local_path = _find_downloaded_file("sc_", track_id, ydl2, dl_info)
+
+            if local_path and os.path.getsize(local_path) > 5000:
+                LOGGER.info(f"SoundCloud OK: {title} -> {local_path}")
+                return local_path, {
+                    "title": title,
+                    "duration": int(duration) if duration else 0,
+                    "channel": uploader,
+                    "thumb": thumb,
+                    "link": webpage,
+                    "source": "SoundCloud",
+                }
+
+        return None, None
+
+    except Exception as e:
+        LOGGER.error(f"SoundCloud error: {e}")
+        return None, None
+
+
+# =====================================================
+# SOURCE 2: YOUTUBE (via yt-dlp — multiple clients)
+# =====================================================
+
+def _youtube_search(query: str):
+    """Search YouTube via yt-dlp flat search."""
     try:
         opts = _base_opts()
         opts["extract_flat"] = True
@@ -325,7 +261,7 @@ def _youtube_search_sync(query: str):
             info = ydl.extract_info(f"ytsearch1:{query}", download=False)
 
             entries = []
-            if info.get("_type") == "playlist" and info.get("entries"):
+            if info and info.get("_type") == "playlist" and info.get("entries"):
                 entries = list(info["entries"])
 
             if not entries:
@@ -333,17 +269,12 @@ def _youtube_search_sync(query: str):
 
             v = entries[0]
             vid = v.get("id") or v.get("url", "")
-            title = v.get("title", "Unknown")
-            duration = v.get("duration", 0) or 0
-            thumb = f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
-            channel = v.get("channel", "") or v.get("uploader", "YouTube")
-
             return {
-                "title": title,
-                "duration": int(duration) if duration else 0,
+                "title": v.get("title", "Unknown"),
+                "duration": int(v.get("duration", 0) or 0),
                 "link": f"https://www.youtube.com/watch?v={vid}",
-                "thumb": thumb,
-                "channel": channel,
+                "thumb": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                "channel": v.get("channel", "") or v.get("uploader", "YouTube"),
                 "id": vid,
                 "source": "YouTube",
             }
@@ -353,27 +284,22 @@ def _youtube_search_sync(query: str):
 
 
 def _youtube_download(url: str, video: bool) -> str:
-    """Download from YouTube using multiple fallback strategies."""
+    """Download from YouTube. Try cookies first, then different clients."""
     cleanup_downloads()
     suffix = "_v" if video else ""
     outtmpl = f"downloads/yt_%(id)s{suffix}.%(ext)s"
+    fmt = "best[height<=480]/best" if video else "bestaudio/best"
 
-    # Simple format strings — don't be picky, just get SOMETHING
-    if video:
-        fmt = "best[height<=480]/best"
-    else:
-        fmt = "bestaudio/best"
-
-    # Try with cookies first (if available), then different clients
-    client_strategies = []
+    # Build strategy list
+    strategies = []
     if _COOKIE_FILE:
-        client_strategies.append((_COOKIE_FILE, None, "yt:cookies"))
-        client_strategies.append((_COOKIE_FILE, ["web"], "yt:cookies+web"))
-    client_strategies.append((None, ["mweb"], "yt:mweb"))
-    client_strategies.append((None, ["android"], "yt:android"))
-    client_strategies.append((None, None, "yt:default"))
+        strategies.append((_COOKIE_FILE, None, "cookies"))
+        strategies.append((_COOKIE_FILE, ["web"], "cookies+web"))
+    strategies.append((None, ["mweb"], "mweb"))
+    strategies.append((None, ["android"], "android"))
+    strategies.append((None, None, "default"))
 
-    for cookie, player_client, desc in client_strategies:
+    for cookie, player_client, desc in strategies:
         opts = _base_opts()
         opts["format"] = fmt
         opts["outtmpl"] = outtmpl
@@ -391,370 +317,75 @@ def _youtube_download(url: str, video: bool) -> str:
                     if os.path.exists(base + ext):
                         fpath = base + ext
                         if os.path.getsize(fpath) > 5000:
-                            LOGGER.info(f"YT download OK [{desc}]: {fpath}")
+                            LOGGER.info(f"YT OK [{desc}]: {fpath}")
                             return fpath
                 if os.path.exists(fname) and os.path.getsize(fname) > 5000:
                     return fname
         except Exception as e:
-            LOGGER.warning(f"YT download [{desc}]: {str(e)[:80]}")
+            LOGGER.warning(f"YT [{desc}]: {str(e)[:80]}")
         time.sleep(0.5)
 
     return None
 
 
 # =====================================================
-# SOURCE 3: PIPED/INVIDIOUS API (YouTube proxy — no blocks)
+# SOURCE 3: BANDCAMP (via yt-dlp)
 # =====================================================
 
-PIPED_INSTANCES = [
-    "https://pipedapi.kavin.rocks",
-    "https://pipedapi.adminforge.de",
-    "https://pipedapi.r4fo.com",
-]
-
-INVIDIOUS_INSTANCES = [
-    "https://inv.nadeko.net",
-    "https://invidious.nerdvpn.de",
-    "https://invidious.privacyredirect.com",
-]
-
-
-def _piped_search_and_get(query: str, video: bool):
-    """Search and download via Piped/Invidious API (YouTube proxies)."""
-    LOGGER.info(f"Piped/Invidious search: {query}")
+def _bandcamp_search_and_download(query: str, video: bool):
+    """Search Bandcamp via yt-dlp."""
+    LOGGER.info(f"Bandcamp search: {query}")
     cleanup_downloads()
-
-    # Try Piped first
-    for base_url in PIPED_INSTANCES:
-        result = _try_piped_instance(base_url, query, video)
-        if result and result[0]:
-            return result
-
-    # Try Invidious
-    for base_url in INVIDIOUS_INSTANCES:
-        result = _try_invidious_instance(base_url, query, video)
-        if result and result[0]:
-            return result
-
-    return None, None
-
-
-def _try_piped_instance(base_url, query, video):
-    try:
-        with httpx.Client(timeout=15, follow_redirects=True) as client:
-            resp = client.get(
-                f"{base_url}/search",
-                params={"q": query, "filter": "music_songs"}
-            )
-            if resp.status_code != 200:
-                return None, None
-
-            try:
-                data = resp.json()
-            except Exception:
-                return None, None
-
-            items = data.get("items", [])
-            if not items:
-                return None, None
-
-            item = None
-            for it in items:
-                if it.get("type") == "stream":
-                    item = it
-                    break
-            if not item:
-                item = items[0]
-
-            vid_url = item.get("url", "")
-            if not vid_url:
-                return None, None
-
-            vid_id = vid_url.split("?v=")[-1] if "?v=" in vid_url else vid_url.strip("/").split("/")[-1]
-            stream_resp = client.get(f"{base_url}/streams/{vid_id}")
-            if stream_resp.status_code != 200:
-                return None, None
-
-            try:
-                stream_data = stream_resp.json()
-            except Exception:
-                return None, None
-
-            title = stream_data.get("title", item.get("title", "Unknown"))
-            duration = stream_data.get("duration", 0)
-            uploader = stream_data.get("uploader", "YouTube")
-            thumb = stream_data.get("thumbnailUrl", "")
-
-            # Get stream URL
-            stream_url = None
-            if video:
-                for vs in stream_data.get("videoStreams", []):
-                    if vs.get("videoOnly", True):
-                        continue
-                    stream_url = vs.get("url")
-                    if stream_url:
-                        break
-
-            if not stream_url:
-                audio_streams = stream_data.get("audioStreams", [])
-                if audio_streams:
-                    audio_streams.sort(key=lambda x: x.get("bitrate", 0), reverse=True)
-                    stream_url = audio_streams[0].get("url")
-
-            if not stream_url:
-                return None, None
-
-            return _download_stream_url(stream_url, vid_id, title, duration,
-                                         uploader, thumb, video, client, "Piped")
-
-    except Exception as e:
-        LOGGER.warning(f"Piped [{base_url}]: {str(e)[:60]}")
-    return None, None
-
-
-def _try_invidious_instance(base_url, query, video):
-    try:
-        with httpx.Client(timeout=15, follow_redirects=True) as client:
-            resp = client.get(
-                f"{base_url}/api/v1/search",
-                params={"q": query, "type": "video", "sort_by": "relevance"}
-            )
-            if resp.status_code != 200:
-                return None, None
-
-            try:
-                results = resp.json()
-            except Exception:
-                return None, None
-
-            if not results:
-                return None, None
-
-            item = results[0]
-            vid_id = item.get("videoId", "")
-            if not vid_id:
-                return None, None
-
-            title = item.get("title", "Unknown")
-            duration = item.get("lengthSeconds", 0)
-            uploader = item.get("author", "YouTube")
-
-            thumbs = item.get("videoThumbnails", [])
-            thumb = thumbs[0].get("url", "") if thumbs else ""
-
-            # Get streams
-            vid_resp = client.get(f"{base_url}/api/v1/videos/{vid_id}")
-            if vid_resp.status_code != 200:
-                return None, None
-
-            try:
-                vid_data = vid_resp.json()
-            except Exception:
-                return None, None
-
-            stream_url = None
-            if video:
-                for fmt in vid_data.get("formatStreams", []):
-                    stream_url = fmt.get("url")
-                    if stream_url:
-                        break
-
-            if not stream_url:
-                for af in vid_data.get("adaptiveFormats", []):
-                    atype = af.get("type", "")
-                    if "audio" in atype:
-                        stream_url = af.get("url")
-                        if stream_url:
-                            break
-
-            if not stream_url:
-                return None, None
-
-            return _download_stream_url(stream_url, vid_id, title, duration,
-                                         uploader, thumb, video, client, "Invidious")
-
-    except Exception as e:
-        LOGGER.warning(f"Invidious [{base_url}]: {str(e)[:60]}")
-    return None, None
-
-
-def _download_stream_url(stream_url, vid_id, title, duration,
-                          uploader, thumb, video, client, source_name):
-    """Download a stream URL to local file."""
-    ext = ".mp4" if video else ".m4a"
-    local_path = f"downloads/{source_name.lower()}_{vid_id}{ext}"
-
-    try:
-        with client.stream("GET", stream_url, follow_redirects=True) as dl_resp:
-            if dl_resp.status_code != 200:
-                return None, None
-            with open(local_path, "wb") as f:
-                total = 0
-                for chunk in dl_resp.iter_bytes(65536):
-                    f.write(chunk)
-                    total += len(chunk)
-                    if total > 100 * 1024 * 1024:  # 100MB limit
-                        break
-
-        if os.path.exists(local_path) and os.path.getsize(local_path) > 5000:
-            LOGGER.info(f"{source_name} OK: {title} -> {local_path}")
-            return local_path, {
-                "title": title,
-                "duration": int(duration) if duration else 0,
-                "channel": uploader,
-                "thumb": thumb,
-                "link": f"https://www.youtube.com/watch?v={vid_id}",
-                "source": f"{source_name} (YouTube)",
-            }
-    except Exception as e:
-        LOGGER.warning(f"{source_name} download: {str(e)[:60]}")
-
-    return None, None
-
-
-# =====================================================
-# SOURCE 4: JIOSAAVN API (Indian music — free)
-# =====================================================
-
-JIOSAAVN_APIS = [
-    "https://saavn.dev/api",
-    "https://jiosaavn-api-privatecvc2.vercel.app/api",
-    "https://saavn.me/api",
-]
-
-
-def _jiosaavn_search_and_get(query: str, video: bool):
-    """Search and download from JioSaavn (great for Bollywood/Bengali)."""
-    LOGGER.info(f"JioSaavn search: {query}")
-    cleanup_downloads()
-
-    for api_base in JIOSAAVN_APIS:
-        try:
-            result = _try_jiosaavn_api(api_base, query)
-            if result and result[0]:
-                return result
-        except Exception as e:
-            LOGGER.warning(f"JioSaavn [{api_base}]: {str(e)[:60]}")
-            continue
-
-    # Fallback: try yt-dlp jiosaavn extractor
     try:
         opts = _base_opts()
-        opts["outtmpl"] = "downloads/jiosaavn_%(id)s.%(ext)s"
+        opts["outtmpl"] = "downloads/bc_%(id)s.%(ext)s"
         opts["format"] = "best"
+
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(f"jioSaavnsearch:{query}", download=True)
-            if info:
-                entries = list(info.get("entries", [])) if info.get("_type") == "playlist" else [info]
-                if entries and entries[0]:
-                    e = entries[0]
-                    local_path = _find_downloaded_file("jiosaavn_", e.get("id", ""), ydl, e)
-                    if local_path and os.path.getsize(local_path) > 5000:
-                        return local_path, {
-                            "title": e.get("title", "Unknown"),
-                            "duration": int(e.get("duration", 0)),
-                            "channel": e.get("artist", e.get("uploader", "JioSaavn")),
-                            "thumb": e.get("thumbnail", ""),
-                            "link": e.get("webpage_url", ""),
-                            "source": "JioSaavn",
-                        }
+            info = ydl.extract_info(f"bcsearch:{query}", download=True)
+
+            if not info:
+                return None, None
+
+            # Handle playlist result
+            if info.get("_type") == "playlist" and info.get("entries"):
+                entries = list(info["entries"])
+                if not entries:
+                    return None, None
+                info = entries[0]
+                if not info:
+                    return None, None
+                # Re-download the specific track
+                url = info.get("webpage_url") or info.get("url")
+                if url:
+                    info = ydl.extract_info(url, download=True)
+
+            track_id = info.get("id", "unknown")
+            local_path = _find_downloaded_file("bc_", track_id, ydl, info)
+
+            if local_path and os.path.getsize(local_path) > 5000:
+                LOGGER.info(f"Bandcamp OK: {info.get('title')} -> {local_path}")
+                return local_path, {
+                    "title": info.get("title", "Unknown"),
+                    "duration": int(info.get("duration", 0) or 0),
+                    "channel": info.get("uploader", info.get("artist", "Bandcamp")),
+                    "thumb": info.get("thumbnail", ""),
+                    "link": info.get("webpage_url", ""),
+                    "source": "Bandcamp",
+                }
+
     except Exception as e:
-        LOGGER.warning(f"JioSaavn yt-dlp: {str(e)[:60]}")
-
-    return None, None
-
-
-def _try_jiosaavn_api(api_base, query):
-    """Try a single JioSaavn API endpoint."""
-    with httpx.Client(timeout=15, follow_redirects=True) as client:
-        # Search
-        resp = client.get(
-            f"{api_base}/search/songs",
-            params={"query": query, "limit": 5}
-        )
-        if resp.status_code != 200:
-            return None, None
-
-        try:
-            data = resp.json()
-        except Exception:
-            return None, None
-
-        results = data.get("data", {}).get("results", [])
-        if not results:
-            return None, None
-
-        song = results[0]
-        song_id = song.get("id", "")
-        title = song.get("name", "Unknown")
-        duration = song.get("duration", 0)
-
-        # Artists
-        artists_data = song.get("artists", {})
-        if isinstance(artists_data, dict):
-            primary = artists_data.get("primary", [])
-            artists = ", ".join(a.get("name", "") for a in primary if a.get("name"))
-        else:
-            artists = ""
-        if not artists:
-            artists = song.get("label", song.get("primaryArtists", "JioSaavn"))
-
-        # Download URLs
-        dl_urls = song.get("downloadUrl", [])
-        if not dl_urls:
-            return None, None
-
-        # Pick highest quality URL
-        download_url = None
-        for dl in reversed(dl_urls):
-            url = dl.get("url", "") or dl.get("link", "")
-            if url:
-                download_url = url
-                break
-
-        if not download_url:
-            return None, None
-
-        # Thumbnail
-        images = song.get("image", [])
-        thumb = ""
-        if images and isinstance(images, list):
-            for img in reversed(images):
-                thumb = img.get("url", "") or img.get("link", "")
-                if thumb:
-                    break
-        elif isinstance(images, str):
-            thumb = images
-
-        song_url = song.get("url", "")
-
-        # Download
-        local_path = f"downloads/jiosaavn_{song_id}.mp3"
-        dl_resp = client.get(download_url, follow_redirects=True)
-        if dl_resp.status_code == 200 and len(dl_resp.content) > 5000:
-            with open(local_path, "wb") as f:
-                f.write(dl_resp.content)
-
-            LOGGER.info(f"JioSaavn OK: {title} -> {local_path}")
-            return local_path, {
-                "title": title,
-                "duration": int(duration) if duration else 0,
-                "channel": artists,
-                "thumb": thumb,
-                "link": song_url or f"https://www.jiosaavn.com/song/{song_id}",
-                "source": "JioSaavn",
-            }
+        LOGGER.warning(f"Bandcamp error: {str(e)[:60]}")
 
     return None, None
 
 
 # =====================================================
-# SPOTIFY / APPLE MUSIC / OTHER URLs -> song name
+# URL HANDLING: Spotify, Apple Music, etc.
 # =====================================================
 
 def _extract_song_from_url(url: str) -> str:
     """Extract song name from streaming service URL."""
-    # Try yt-dlp extraction
     try:
         opts = _base_opts()
         opts["extract_flat"] = True
@@ -767,7 +398,6 @@ def _extract_song_from_url(url: str) -> str:
     except Exception as e:
         LOGGER.warning(f"URL extract (yt-dlp): {str(e)[:60]}")
 
-    # Fallback: HTTP page title
     try:
         with httpx.Client(timeout=10, follow_redirects=True) as client:
             resp = client.get(url)
@@ -791,7 +421,6 @@ def _extract_song_from_url(url: str) -> str:
 
 
 def _is_streaming_url(url: str) -> str:
-    """Check if URL is from a known streaming service."""
     patterns = {
         "Spotify": r'https?://(open\.)?spotify\.com/',
         "Apple Music": r'https?://music\.apple\.com/',
@@ -812,35 +441,33 @@ def _is_streaming_url(url: str) -> str:
 
 
 # =====================================================
-# MASTER SEARCH: multi-source fallback
+# MASTER SEARCH: yt-dlp only — no external APIs
 # =====================================================
 
 def search_and_get_media(query: str, video: bool):
     """
-    Multi-source fallback (5 layers):
-      1. SoundCloud (most reliable, no IP blocks)
-      2. YouTube via yt-dlp (cookies + multiple clients)
-      3. JioSaavn (Bollywood/Bengali, multiple API mirrors)
-      4. Piped API (YouTube proxy)
-      5. Invidious API (YouTube proxy)
-    Returns (local_file_path, info_dict) or raises.
+    Multi-source via yt-dlp only (no external API dependencies):
+      1. SoundCloud (most reliable, never IP-blocked)
+      2. YouTube (cookies + mweb/android clients)
+      3. Bandcamp (indie/alternative music)
+    All sources use yt-dlp — works on any platform (Heroku/VPS/local).
     """
     errors = []
 
-    # === Source 1: SoundCloud (most reliable) ===
+    # === Source 1: SoundCloud ===
     LOGGER.info("=== Source 1: SoundCloud ===")
     try:
-        path, info = _soundcloud_search_and_get(query, video)
+        path, info = _soundcloud_search_and_download(query, video)
         if path and info:
             return path, info
         errors.append("SoundCloud: no results")
     except Exception as e:
         errors.append(f"SC: {str(e)[:50]}")
 
-    # === Source 2: YouTube (yt-dlp) ===
+    # === Source 2: YouTube ===
     LOGGER.info("=== Source 2: YouTube ===")
     try:
-        yt_info = _youtube_search_sync(query)
+        yt_info = _youtube_search(query)
         if yt_info:
             path = _youtube_download(yt_info["link"], video)
             if path:
@@ -851,27 +478,59 @@ def search_and_get_media(query: str, video: bool):
     except Exception as e:
         errors.append(f"YT: {str(e)[:50]}")
 
-    # === Source 3: JioSaavn (Indian/Bengali music) ===
-    LOGGER.info("=== Source 3: JioSaavn ===")
+    # === Source 3: Bandcamp ===
+    LOGGER.info("=== Source 3: Bandcamp ===")
     try:
-        path, info = _jiosaavn_search_and_get(query, video)
+        path, info = _bandcamp_search_and_download(query, video)
         if path and info:
             return path, info
-        errors.append("JioSaavn: no results")
+        errors.append("Bandcamp: no results")
     except Exception as e:
-        errors.append(f"JioSaavn: {str(e)[:50]}")
-
-    # === Source 4: Piped/Invidious API (YouTube proxy) ===
-    LOGGER.info("=== Source 4: Piped/Invidious ===")
-    try:
-        path, info = _piped_search_and_get(query, video)
-        if path and info:
-            return path, info
-        errors.append("Piped/Invidious: no results")
-    except Exception as e:
-        errors.append(f"Piped: {str(e)[:50]}")
+        errors.append(f"BC: {str(e)[:50]}")
 
     raise Exception(f"All sources failed: {'; '.join(errors)}")
+
+
+# =====================================================
+# SMART MATCHING
+# =====================================================
+
+def _pick_best_match(entries, query):
+    query_lower = query.lower().strip()
+    query_words = set(query_lower.split())
+    wants_remix = any(w in query_lower for w in ["remix", "slowed", "reverb", "lofi", "lo-fi"])
+
+    best_entry = None
+    best_score = -999
+
+    for entry in entries:
+        title = (entry.get("title") or "").lower()
+        if not title:
+            continue
+
+        title_words = set(title.split())
+        overlap = len(query_words & title_words)
+        substring_bonus = 3 if query_lower in title else 0
+        substring_bonus += 2 if title in query_lower else 0
+
+        bad_words = ["slowed", "reverb", "reverbed", "lofi", "lo-fi", "8d", "bass boosted", "nightcore"]
+        penalty = 0
+        if not wants_remix:
+            for bw in bad_words:
+                if bw in title and bw not in query_lower:
+                    penalty += 5
+
+        len_penalty = abs(len(title) - len(query_lower)) / max(len(query_lower), 1) * 0.3
+        official_bonus = 1 if any(w in title for w in ["original", "official"]) else 0
+        dur = entry.get("duration", 0) or 0
+        short_penalty = 3 if dur and dur < 60 else 0
+
+        score = overlap + substring_bonus + official_bonus - penalty - len_penalty - short_penalty
+        if score > best_score:
+            best_score = score
+            best_entry = entry
+
+    return best_entry
 
 
 # =====================================================
@@ -957,7 +616,7 @@ async def try_play_stream(chat_id, media_path, video, max_retries=4):
 
 
 # =====================================================
-# NOW-PLAYING message builder
+# NOW-PLAYING message
 # =====================================================
 
 def _build_now_playing(info: dict, video: bool, requester: str,
@@ -989,7 +648,6 @@ def _build_now_playing(info: dict, video: bool, requester: str,
 
 
 async def send_now_playing(chat_id, info, video, requester, queue_len=0):
-    """Send the now-playing message with thumbnail + inline buttons."""
     caption = _build_now_playing(info, video, requester, queue_len)
     buttons = _play_buttons(info.get("link", ""))
     thumb = info.get("thumb", "")
@@ -1008,11 +666,10 @@ async def send_now_playing(chat_id, info, video, requester, queue_len=0):
 
 
 # =====================================================
-# QUEUE: auto-play next song when current ends
+# QUEUE: auto-play next song
 # =====================================================
 
 async def play_next_in_queue(chat_id: int):
-    """Play next song from queue."""
     LOGGER.info(f"play_next_in_queue for {chat_id}")
     ACTIVE_CHATS.pop(chat_id, None)
 
@@ -1085,7 +742,6 @@ async def play_next_in_queue(chat_id: int):
 
 @calls.on_update(ptg_filters.stream_end)
 async def _on_stream_end(client, update):
-    """Auto-play next song when current one ends."""
     chat_id = update.chat_id
     LOGGER.info(f"Stream ended in {chat_id}")
     await play_next_in_queue(chat_id)
@@ -1215,15 +871,14 @@ async def _play(client, message: Message, video: bool):
             f"কিউ দেখতে: <code>/queue</code>"
         )
 
-    # --- Nothing playing → play now ---
+    # --- Nothing playing -> play now ---
     status = await message.reply_text(
-        "<b>খুঁজছি...</b> (SoundCloud → YouTube → JioSaavn → Piped)"
+        "<b>খুঁজছি...</b> 🔍"
     )
 
     try:
         loop = asyncio.get_event_loop()
 
-        # Ensure assistant is in chat
         assistant_ok = await ensure_assistant(chat_id)
         if not assistant_ok:
             return await status.edit(
@@ -1252,13 +907,13 @@ async def _play(client, message: Message, video: bool):
 
         # For YouTube URL, try direct download first
         if is_yt_url:
-            await status.edit("<b>YouTube লিংক থেকে লোড হচ্ছে...</b>")
+            await status.edit("<b>YouTube থেকে লোড হচ্ছে...</b>")
             yt_path = await loop.run_in_executor(
                 None, _youtube_download, query, video
             )
             if yt_path:
                 yt_info = await loop.run_in_executor(
-                    None, _youtube_search_sync, query
+                    None, _youtube_search, query
                 )
                 if not yt_info:
                     yt_info = {
@@ -1282,14 +937,14 @@ async def _play(client, message: Message, video: bool):
                         pass
                     return
 
-            # Direct download failed → extract title and search SoundCloud
+            # Direct YT download failed -> extract title and use multi-search
             yt_info = await loop.run_in_executor(
-                None, _youtube_search_sync, query
+                None, _youtube_search, query
             )
             if yt_info:
                 search_query = yt_info.get("title", query)
 
-        # Search and download from all sources
+        # Multi-source search and download
         await status.edit(
             f"📥 <b>ডাউনলোড হচ্ছে...</b>\n"
             f"🔎 <code>{search_query[:50]}</code>"
@@ -1306,14 +961,13 @@ async def _play(client, message: Message, video: bool):
             return await status.edit("⏱ <b>টাইমআউট!</b> আবার চেষ্টা করুন।")
         except Exception as e:
             return await status.edit(
-                f"<b>সব সোর্স ব্যর্থ!</b>\n<code>{str(e)[:100]}</code>\n\n"
+                f"<b>গান পাওয়া যায়নি!</b>\n<code>{str(e)[:100]}</code>\n\n"
                 "অন্য গানের নাম দিয়ে চেষ্টা করুন।"
             )
 
         if not media_path:
             return await status.edit("<b>মিডিয়া পাওয়া যায়নি।</b>")
 
-        # Play
         source_name = info.get("source", "?")
         await status.edit(
             f"🎶 <b>Voice Chat-এ যোগ হচ্ছে...</b>\n📡 {source_name}"
@@ -1339,7 +993,6 @@ async def _play(client, message: Message, video: bool):
                 f"<b>স্ট্রিমিং ব্যর্থ!</b>\n<code>{result}</code>"
             )
 
-        # Success
         try:
             await status.delete()
         except Exception:
@@ -1364,7 +1017,7 @@ async def _play(client, message: Message, video: bool):
 
 
 # =====================================================
-# CALLBACK: close play message
+# CALLBACKS & COMMANDS
 # =====================================================
 
 @app.on_callback_query(filters.regex("^close_play_msg$"))
@@ -1374,10 +1027,6 @@ async def close_play_msg_cb(client, query):
     except Exception:
         await query.answer("মুছতে পারছি না!", show_alert=True)
 
-
-# =====================================================
-# COMMANDS
-# =====================================================
 
 @app.on_message(filters.command(["play", "p"]) & filters.group)
 async def play_cmd(client, message: Message):
@@ -1391,7 +1040,6 @@ async def vplay_cmd(client, message: Message):
 
 @app.on_message(filters.command(["queue", "q"]) & filters.group)
 async def queue_cmd(client, message: Message):
-    """Show current queue."""
     chat_id = message.chat.id
     current = ACTIVE_CHATS.get(chat_id)
     queue = QUEUES.get(chat_id, deque())

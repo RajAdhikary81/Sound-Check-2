@@ -91,9 +91,9 @@ async def debug_cmd(client, message: Message):
     except Exception as e:
         lines.append(f"🌐 <b>Piped API:</b> ❌ <code>{str(e)[:50]}</code>")
 
-    lines.append(f"\n📌 <b>Build:</b> <code>v11-multiplatform-4layer</code>")
-    lines.append(f"🛡 <b>Features:</b> JioSaavn + SoundCloud + YouTube + Piped, rate-limit, anti-flood")
-    lines.append(f"🌐 <b>Sources:</b> JioSaavn, SoundCloud, YouTube (web/mweb/android), Piped API")
+    lines.append(f"\n📌 <b>Build:</b> <code>v12-ytdlp-only-stable</code>")
+    lines.append(f"🛡 <b>Features:</b> yt-dlp only (no external APIs), rate-limit, anti-flood")
+    lines.append(f"🌐 <b>Sources:</b> SoundCloud, YouTube (cookies/mweb/android), Bandcamp")
 
     await message.reply_text("\n".join(lines))
 
