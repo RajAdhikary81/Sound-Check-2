@@ -717,26 +717,16 @@ def _is_streaming_url(url: str) -> str:
 def search_and_get_media(query: str, video: bool):
     """
     Multi-source search (no external API keys needed):
-      1. SoundCloud (most reliable, no IP blocks)
-      2. JioSaavn (free API — best for Hindi/Bengali/Indian songs)
-      3. YouTube (yt-dlp with multiple client strategies)
-      4. Invidious (YouTube alternative frontend)
+      1. JioSaavn (free API — best for Hindi/Bengali/Indian songs)
+      2. YouTube (yt-dlp with cookies + multiple client strategies)
+      3. Invidious (YouTube alternative frontend, no cookies)
+      4. SoundCloud (fallback — global music catalog)
       5. Query variations as last resort
     """
     errors = []
 
-    # === Source 1: SoundCloud ===
-    LOGGER.info("=== Source 1: SoundCloud ===")
-    try:
-        path, info = _soundcloud_search_and_download(query, video)
-        if path and info:
-            return path, info
-        errors.append("SoundCloud: no results")
-    except Exception as e:
-        errors.append(f"SC: {str(e)[:50]}")
-
-    # === Source 2: JioSaavn ===
-    LOGGER.info("=== Source 2: JioSaavn ===")
+    # === Source 1: JioSaavn ===
+    LOGGER.info("=== Source 1: JioSaavn ===")
     try:
         path, info = _jiosaavn_search_and_download(query, video)
         if path and info:
@@ -745,8 +735,8 @@ def search_and_get_media(query: str, video: bool):
     except Exception as e:
         errors.append(f"JS: {str(e)[:50]}")
 
-    # === Source 3: YouTube (yt-dlp) ===
-    LOGGER.info("=== Source 3: YouTube ===")
+    # === Source 2: YouTube (yt-dlp) ===
+    LOGGER.info("=== Source 2: YouTube ===")
     try:
         yt_info = _youtube_search(query)
         if yt_info:
@@ -759,8 +749,8 @@ def search_and_get_media(query: str, video: bool):
     except Exception as e:
         errors.append(f"YT: {str(e)[:50]}")
 
-    # === Source 4: Invidious (YouTube alt frontend) ===
-    LOGGER.info("=== Source 4: Invidious ===")
+    # === Source 3: Invidious (YouTube alt frontend) ===
+    LOGGER.info("=== Source 3: Invidious ===")
     try:
         path, info = _invidious_search_and_download(query, video)
         if path and info:
@@ -769,7 +759,17 @@ def search_and_get_media(query: str, video: bool):
     except Exception as e:
         errors.append(f"Inv: {str(e)[:50]}")
 
-    # === Source 5: Query variations on SoundCloud + JioSaavn ===
+    # === Source 4: SoundCloud ===
+    LOGGER.info("=== Source 4: SoundCloud ===")
+    try:
+        path, info = _soundcloud_search_and_download(query, video)
+        if path and info:
+            return path, info
+        errors.append("SoundCloud: no results")
+    except Exception as e:
+        errors.append(f"SC: {str(e)[:50]}")
+
+    # === Source 5: Query variations on JioSaavn + SoundCloud ===
     LOGGER.info("=== Source 5: Query variations ===")
     variations = []
     q_lower = query.lower()
@@ -779,13 +779,13 @@ def search_and_get_media(query: str, video: bool):
 
     for alt_query in variations[:2]:
         try:
-            path, info = _soundcloud_search_and_download(alt_query, video)
+            path, info = _jiosaavn_search_and_download(alt_query, video)
             if path and info:
                 return path, info
         except Exception:
             pass
         try:
-            path, info = _jiosaavn_search_and_download(alt_query, video)
+            path, info = _soundcloud_search_and_download(alt_query, video)
             if path and info:
                 return path, info
         except Exception:
