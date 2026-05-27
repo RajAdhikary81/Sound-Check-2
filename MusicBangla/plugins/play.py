@@ -3,6 +3,7 @@ import asyncio
 import time
 import re
 import random
+import shutil
 import yt_dlp
 import httpx
 from collections import deque
@@ -35,6 +36,7 @@ _MAX_CONCURRENT = 3
 
 # --- Cookies ---
 _COOKIE_FILE = None
+
 
 def _fix_cookie_line(line: str) -> str:
     line = line.strip()
@@ -134,14 +136,18 @@ def _base_opts():
 
 
 def cleanup_downloads():
+    """Clean old downloaded files to avoid disk issues."""
     try:
+        now = time.time()
         for f in os.listdir("downloads"):
             fpath = os.path.join("downloads", f)
             if os.path.isfile(fpath):
-                try:
-                    os.remove(fpath)
-                except Exception:
-                    pass
+                # Keep files less than 10 min old (for queue playback)
+                if now - os.path.getmtime(fpath) > 600:
+                    try:
+                        os.remove(fpath)
+                    except Exception:
+                        pass
     except Exception:
         pass
 
@@ -220,7 +226,6 @@ def _find_downloaded_file(prefix, track_id, ydl=None, info=None):
 def _soundcloud_search_and_download(query: str, video: bool):
     """Search SoundCloud and download. No external APIs needed."""
     LOGGER.info(f"SoundCloud search: {query}")
-    cleanup_downloads()
 
     try:
         opts = _base_opts()
@@ -281,22 +286,24 @@ def _soundcloud_search_and_download(query: str, video: bool):
 
 
 # =====================================================
-# SOURCE 2: JIOSAAVN API (free, no auth — Hindi/Bengali)
+# SOURCE 2: JIOSAAVN (multiple free API endpoints)
 # =====================================================
 
 _JIOSAAVN_API_BASES = [
     "https://saavn.dev/api",
     "https://jiosaavn-api-privatecvc2.vercel.app/api",
+    "https://jio-savaan-private.vercel.app/api",
+    "https://jiosaavn-api-2-harsh-py.vercel.app/api",
 ]
+
 
 def _jiosaavn_search_and_download(query: str, video: bool):
     """Search JioSaavn and download via free public API."""
     LOGGER.info(f"JioSaavn search: {query}")
-    cleanup_downloads()
 
     for api_base in _JIOSAAVN_API_BASES:
         try:
-            with httpx.Client(timeout=20, follow_redirects=True) as client:
+            with httpx.Client(timeout=15, follow_redirects=True) as client:
                 # Search
                 resp = client.get(
                     f"{api_base}/search/songs",
@@ -345,9 +352,7 @@ def _jiosaavn_search_and_download(query: str, video: bool):
                 dl_urls = song.get("downloadUrl", [])
                 if not dl_urls:
                     # Try fetching song details by ID
-                    detail_resp = client.get(
-                        f"{api_base}/songs/{song_id}",
-                    )
+                    detail_resp = client.get(f"{api_base}/songs/{song_id}")
                     if detail_resp.status_code == 200:
                         detail_data = detail_resp.json()
                         song_detail = detail_data.get("data", [detail_data])
@@ -361,7 +366,6 @@ def _jiosaavn_search_and_download(query: str, video: bool):
 
                 # Pick highest quality download URL
                 if isinstance(dl_urls, list):
-                    # Sort by quality (320kbps > 160kbps > 96kbps)
                     dl_urls.sort(
                         key=lambda x: int(x.get("quality", "0").replace("kbps", "").strip() or 0),
                         reverse=True,
@@ -376,7 +380,7 @@ def _jiosaavn_search_and_download(query: str, video: bool):
                     continue
 
                 # Download audio file
-                dl_resp = client.get(audio_url, follow_redirects=True)
+                dl_resp = client.get(audio_url, follow_redirects=True, timeout=30)
                 if dl_resp.status_code != 200 or len(dl_resp.content) < 5000:
                     LOGGER.warning(f"JioSaavn [{api_base}]: download failed, size={len(dl_resp.content)}")
                     continue
@@ -416,10 +420,10 @@ def _jiosaavn_search_and_download(query: str, video: bool):
 
 def _youtube_search(query: str):
     """Search YouTube via yt-dlp flat search."""
-    # Try multiple search strategies
     search_strategies = []
     if _COOKIE_FILE:
         search_strategies.append((_COOKIE_FILE, ["web_creator"], "cookies+web_creator"))
+        search_strategies.append((_COOKIE_FILE, ["web"], "cookies+web"))
     search_strategies.append((None, ["mediaconnect"], "mediaconnect"))
     search_strategies.append((None, ["web_creator"], "web_creator"))
     search_strategies.append((None, None, "default"))
@@ -463,9 +467,7 @@ def _youtube_search(query: str):
 
 
 def _youtube_download(url: str, video: bool) -> str:
-    """Download from YouTube using multiple client strategies including
-    mediaconnect (no cookies needed, bypasses bot detection)."""
-    cleanup_downloads()
+    """Download from YouTube using multiple client strategies."""
     suffix = "_v" if video else ""
     outtmpl = f"downloads/yt_%(id)s{suffix}.%(ext)s"
 
@@ -480,15 +482,15 @@ def _youtube_download(url: str, video: bool) -> str:
             "bestaudio[ext=webm]/bestaudio/best[height<=360]/best"
         )
 
-    # mediaconnect client bypasses bot detection without cookies
+    # Build strategy list - cookies-based first if available
     strategies = []
-    strategies.append((None, ["mediaconnect"], "mediaconnect"))
     if _COOKIE_FILE:
         strategies.append((_COOKIE_FILE, ["web_creator"], "cookies+web_creator"))
-        strategies.append((_COOKIE_FILE, ["ios"], "cookies+ios"))
         strategies.append((_COOKIE_FILE, ["web"], "cookies+web"))
+        strategies.append((_COOKIE_FILE, ["ios"], "cookies+ios"))
+        strategies.append((_COOKIE_FILE, ["mweb"], "cookies+mweb"))
+    strategies.append((None, ["mediaconnect"], "mediaconnect"))
     strategies.append((None, ["web_creator"], "web_creator"))
-    strategies.append((None, ["ios"], "ios"))
     strategies.append((None, ["tv"], "tv"))
     strategies.append((None, ["mweb"], "mweb"))
     strategies.append((None, None, "default"))
@@ -520,7 +522,6 @@ def _youtube_download(url: str, video: bool) -> str:
         except Exception as e:
             emsg = str(e)[:120]
             LOGGER.warning(f"YT [{desc}]: {emsg}")
-            # If bot detection, skip cookie-less strategies that will also fail
             if "Sign in to confirm" in emsg and not cookie:
                 continue
         time.sleep(0.3)
@@ -529,7 +530,122 @@ def _youtube_download(url: str, video: bool) -> str:
 
 
 # =====================================================
-# SOURCE 4: INVIDIOUS API (YouTube alternative frontend)
+# SOURCE 4: PIPED API (YouTube alternative — replaces Invidious)
+# =====================================================
+
+_PIPED_INSTANCES = [
+    "https://pipedapi.kavin.rocks",
+    "https://pipedapi.r4fo.com",
+    "https://pipedapi.adminforge.de",
+    "https://api.piped.projectsegfau.lt",
+    "https://pipedapi.in.projectsegfau.lt",
+    "https://pipedapi.leptons.xyz",
+]
+
+
+def _piped_search_and_download(query: str, video: bool):
+    """Search and download via Piped API (YouTube alternative frontend)."""
+    LOGGER.info(f"Piped search: {query}")
+
+    for api_base in _PIPED_INSTANCES:
+        try:
+            with httpx.Client(timeout=15, follow_redirects=True) as client:
+                # Search
+                resp = client.get(
+                    f"{api_base}/search",
+                    params={"q": query, "filter": "videos"},
+                    headers={"Accept": "application/json"},
+                )
+                if resp.status_code != 200:
+                    continue
+
+                data = resp.json()
+                items = data.get("items", [])
+                if not items:
+                    continue
+
+                # Find first video
+                best = None
+                for item in items[:5]:
+                    if item.get("type") == "stream":
+                        best = item
+                        break
+                if not best:
+                    best = items[0]
+
+                # Extract video ID from url like /watch?v=xxx
+                vid_url = best.get("url", "")
+                vid_id_match = re.search(r'[?&]v=([a-zA-Z0-9_-]+)', vid_url)
+                if not vid_id_match:
+                    # Try extracting from thumbnail
+                    thumb = best.get("thumbnail", "")
+                    vid_id_match = re.search(r'/vi/([a-zA-Z0-9_-]+)/', thumb)
+                if not vid_id_match:
+                    continue
+                vid_id = vid_id_match.group(1)
+
+                # Get streams
+                stream_resp = client.get(
+                    f"{api_base}/streams/{vid_id}",
+                    headers={"Accept": "application/json"},
+                )
+                if stream_resp.status_code != 200:
+                    continue
+
+                stream_data = stream_resp.json()
+                audio_streams = stream_data.get("audioStreams", [])
+
+                if not audio_streams:
+                    continue
+
+                # Sort by bitrate (highest first)
+                audio_streams.sort(key=lambda x: int(x.get("bitrate", 0) or 0), reverse=True)
+
+                stream_url = audio_streams[0].get("url", "")
+                if not stream_url:
+                    continue
+
+                title = stream_data.get("title", best.get("title", "Unknown"))
+                duration = stream_data.get("duration", best.get("duration", 0))
+                uploader = stream_data.get("uploader", best.get("uploaderName", "YouTube"))
+
+                # Download the audio stream
+                dl_resp = client.get(stream_url, follow_redirects=True, timeout=60)
+                if dl_resp.status_code != 200 or len(dl_resp.content) < 5000:
+                    continue
+
+                mime = audio_streams[0].get("mimeType", audio_streams[0].get("type", ""))
+                if "mp4" in mime or "m4a" in mime:
+                    ext = ".m4a"
+                elif "webm" in mime or "opus" in mime:
+                    ext = ".webm"
+                else:
+                    ext = ".m4a"
+
+                local_path = f"downloads/pip_{vid_id}{ext}"
+                with open(local_path, "wb") as f:
+                    f.write(dl_resp.content)
+
+                if os.path.exists(local_path) and os.path.getsize(local_path) > 5000:
+                    LOGGER.info(f"Piped OK [{api_base}]: {title}")
+                    return local_path, {
+                        "title": title,
+                        "duration": int(duration) if duration else 0,
+                        "channel": uploader,
+                        "thumb": f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg",
+                        "link": f"https://www.youtube.com/watch?v={vid_id}",
+                        "source": "YouTube (Piped)",
+                    }
+
+        except Exception as e:
+            LOGGER.warning(f"Piped [{api_base}]: {str(e)[:80]}")
+            continue
+
+    return None, None
+
+
+# =====================================================
+# SOURCE 5: INVIDIOUS API (YouTube alternative frontend)
 # =====================================================
 
 _INVIDIOUS_INSTANCES = [
@@ -538,12 +654,14 @@ _INVIDIOUS_INSTANCES = [
     "https://iv.datura.network",
     "https://invidious.private.coffee",
     "https://yt.artemislena.eu",
+    "https://invidious.fdn.fr",
+    "https://inv.tux.pizza",
+    "https://invidious.protokoll-11.de",
 ]
 
 def _invidious_search_and_download(query: str, video: bool):
     """Search and download via Invidious API (YouTube frontend)."""
     LOGGER.info(f"Invidious search: {query}")
-    cleanup_downloads()
 
     for api_base in _INVIDIOUS_INSTANCES:
         try:
@@ -560,7 +678,6 @@ def _invidious_search_and_download(query: str, video: bool):
                 if not results or not isinstance(results, list):
                     continue
 
-                # Find first video result
                 best = None
                 for item in results[:5]:
                     if item.get("type") == "video":
@@ -573,7 +690,6 @@ def _invidious_search_and_download(query: str, video: bool):
                 if not vid_id:
                     continue
 
-                # Get video details with audio streams
                 vid_resp = client.get(
                     f"{api_base}/api/v1/videos/{vid_id}",
                     headers={"Accept": "application/json"},
@@ -584,7 +700,6 @@ def _invidious_search_and_download(query: str, video: bool):
                 vid_data = vid_resp.json()
                 adaptive = vid_data.get("adaptiveFormats", [])
 
-                # Filter audio-only streams
                 audio_streams = [
                     s for s in adaptive
                     if s.get("type", "").startswith("audio/")
@@ -592,13 +707,11 @@ def _invidious_search_and_download(query: str, video: bool):
                 if not audio_streams:
                     continue
 
-                # Sort by bitrate (highest first)
                 audio_streams.sort(key=lambda x: int(x.get("bitrate", 0) or 0), reverse=True)
                 stream_url = audio_streams[0].get("url", "")
                 if not stream_url:
                     continue
 
-                # Download
                 title = vid_data.get("title", best.get("title", "Unknown"))
                 duration = vid_data.get("lengthSeconds", best.get("lengthSeconds", 0))
 
@@ -637,13 +750,12 @@ def _invidious_search_and_download(query: str, video: bool):
 
 
 # =====================================================
-# SOURCE 5: DIRECT YT-DLP for any URL (generic)
+# SOURCE 6: DIRECT YT-DLP for any URL (generic)
 # =====================================================
 
 def _generic_ytdlp_download(url: str, video: bool):
     """Download from any yt-dlp supported URL (SoundCloud direct, Deezer, etc)."""
     LOGGER.info(f"Generic yt-dlp download: {url}")
-    cleanup_downloads()
 
     if video:
         fmt = "best[height<=480]/best"
@@ -753,14 +865,19 @@ def _is_streaming_url(url: str) -> str:
 
 def search_and_get_media(query: str, video: bool):
     """
-    Multi-source search (no external API keys needed):
+    Multi-source search with robust fallback chain:
       1. JioSaavn (free API — best for Hindi/Bengali/Indian songs)
       2. YouTube (yt-dlp with cookies + multiple client strategies)
-      3. Invidious (YouTube alternative frontend, no cookies)
-      4. SoundCloud (fallback — global music catalog)
-      5. Query variations as last resort
+      3. Piped (YouTube alternative frontend, no cookies)
+      4. Invidious (another YouTube alt frontend)
+      5. Query variations on JioSaavn
+      6. SoundCloud (last resort — often returns wrong songs)
     """
     errors = []
+
+    # Periodic cleanup (not on every call)
+    if random.random() < 0.3:
+        cleanup_downloads()
 
     # === Source 1: JioSaavn ===
     LOGGER.info("=== Source 1: JioSaavn ===")
@@ -786,8 +903,18 @@ def search_and_get_media(query: str, video: bool):
     except Exception as e:
         errors.append(f"YT: {str(e)[:50]}")
 
-    # === Source 3: Invidious (YouTube alt frontend) ===
-    LOGGER.info("=== Source 3: Invidious ===")
+    # === Source 3: Piped (YouTube alt frontend) ===
+    LOGGER.info("=== Source 3: Piped ===")
+    try:
+        path, info = _piped_search_and_download(query, video)
+        if path and info:
+            return path, info
+        errors.append("Piped: no results")
+    except Exception as e:
+        errors.append(f"Pip: {str(e)[:50]}")
+
+    # === Source 4: Invidious ===
+    LOGGER.info("=== Source 4: Invidious ===")
     try:
         path, info = _invidious_search_and_download(query, video)
         if path and info:
@@ -796,8 +923,25 @@ def search_and_get_media(query: str, video: bool):
     except Exception as e:
         errors.append(f"Inv: {str(e)[:50]}")
 
-    # === Source 4: SoundCloud ===
-    LOGGER.info("=== Source 4: SoundCloud ===")
+    # === Source 5: Query variations on JioSaavn ===
+    LOGGER.info("=== Source 5: Query variations ===")
+    variations = []
+    q_lower = query.lower()
+    if "official" not in q_lower:
+        variations.append(f"{query} official audio")
+    variations.append(f"{query} song")
+    variations.append(f"{query} audio")
+
+    for alt_query in variations[:3]:
+        try:
+            path, info = _jiosaavn_search_and_download(alt_query, video)
+            if path and info:
+                return path, info
+        except Exception:
+            pass
+
+    # === Source 6: SoundCloud (last resort — often returns wrong matches) ===
+    LOGGER.info("=== Source 6: SoundCloud (last resort) ===")
     try:
         path, info = _soundcloud_search_and_download(query, video)
         if path and info:
@@ -805,28 +949,6 @@ def search_and_get_media(query: str, video: bool):
         errors.append("SoundCloud: no results")
     except Exception as e:
         errors.append(f"SC: {str(e)[:50]}")
-
-    # === Source 5: Query variations on JioSaavn + SoundCloud ===
-    LOGGER.info("=== Source 5: Query variations ===")
-    variations = []
-    q_lower = query.lower()
-    if "official" not in q_lower:
-        variations.append(f"{query} official audio")
-    variations.append(f"{query} audio")
-
-    for alt_query in variations[:2]:
-        try:
-            path, info = _jiosaavn_search_and_download(alt_query, video)
-            if path and info:
-                return path, info
-        except Exception:
-            pass
-        try:
-            path, info = _soundcloud_search_and_download(alt_query, video)
-            if path and info:
-                return path, info
-        except Exception:
-            pass
 
     raise Exception(f"All sources failed: {'; '.join(errors)}")
 
@@ -953,7 +1075,6 @@ async def try_play_stream(chat_id, media_path, video, max_retries=4):
             elif "chat_admin_required" in err or "not found" in err:
                 return "NO_PERM"
             elif "file_part" in err or "file_reference" in err:
-                # File issue — retry with fresh stream
                 if video:
                     stream = MediaStream(
                         media_path,
@@ -1245,7 +1366,6 @@ async def _play(client, message: Message, video: bool):
         else:
             streaming_service = _is_streaming_url(query)
             if not streaming_service:
-                # Try generic yt-dlp download for unknown URLs
                 LOGGER.info(f"Unknown URL, trying generic download: {query}")
                 streaming_service = "Direct"
 
@@ -1373,14 +1493,13 @@ async def _play(client, message: Message, video: bool):
                         pass
                     return
 
-            # YT direct failed -> try Invidious for this video
+            # YT direct failed -> fall through to multi-source
             await status.edit("<b>YouTube বিকল্প উৎস থেকে চেষ্টা করছি...</b>")
             yt_info_search = await loop.run_in_executor(
                 None, _youtube_search, query
             )
             if yt_info_search:
                 search_query = yt_info_search.get("title", query)
-            # Fall through to multi-source search
 
         # Multi-source search and download
         await status.edit(
@@ -1595,7 +1714,6 @@ async def set_cookies_cmd(client, message: Message):
         except Exception as e:
             return await message.reply_text(f"❌ ফাইল পড়া যায়নি: {str(e)[:80]}")
     else:
-        # Get from command text
         cookie_text = message.text.split(None, 1)[1] if len(message.command) > 1 else ""
         if not cookie_text and message.reply_to_message:
             cookie_text = message.reply_to_message.text or ""
@@ -1667,7 +1785,6 @@ async def cookie_status_cmd(client, message: Message):
             lines = [l for l in content.split("\n") if l.strip() and not l.startswith("#")]
             fsize = os.path.getsize(_COOKIE_FILE)
 
-            # Check if cookies are YouTube cookies
             yt_cookies = sum(1 for l in lines if ".youtube.com" in l or ".google.com" in l)
 
             # Test cookies

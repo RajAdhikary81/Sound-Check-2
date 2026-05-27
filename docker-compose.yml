@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  musicbangla:
+    build: .
+    container_name: musicbangla-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./downloads:/app/downloads
+      - ./cookies.txt:/app/cookies.txt:ro

@@ -5,16 +5,17 @@
   "keywords": ["python3", "telegram", "bot", "MusicBangla", "BanglaBot", "pyrogram", "tgcalls", "games"],
   "stack": "heroku-22",
   "env": {
-    "API_ID": { "description": "my.telegram.org থেকে নিন", "value": "30137409", "required": true },
-    "API_HASH": { "description": "my.telegram.org থেকে নিন", "value": "3336d0f8c9de7cd33b55c655032fa7b3", "required": true },
+    "API_ID": { "description": "my.telegram.org থেকে নিন", "value": "", "required": true },
+    "API_HASH": { "description": "my.telegram.org থেকে নিন", "value": "", "required": true },
     "BOT_TOKEN": { "description": "@BotFather থেকে নিন", "value": "", "required": true },
-    "MONGO_DB_URI": { "description": "MongoDB connection URL", "value": "mongodb+srv://Raj07Sukh:Raj07Sukh@cluster0.1ca9rrn.mongodb.net/?appName=Cluster0", "required": true },
-    "OWNER_ID": { "description": "আপনার Telegram User ID", "value": "5358817399", "required": true },
-    "OWNER_USERNAME": { "description": "@ ছাড়া আপনার username", "value": "R4J_81", "required": false },
+    "MONGO_DB_URI": { "description": "MongoDB connection URL", "value": "", "required": true },
+    "OWNER_ID": { "description": "আপনার Telegram User ID", "value": "", "required": true },
+    "OWNER_USERNAME": { "description": "@ ছাড়া আপনার username", "value": "", "required": false },
     "STRING_SESSION": { "description": "Pyrogram v2 String Session (spare account দিয়ে)", "value": "", "required": true },
-    "LOG_GROUP_ID": { "description": "Log group ID (বটকে admin করতে হবে)", "value": "-1003935489315", "required": true },
-    "SUPPORT_GROUP": { "description": "সাপোর্ট গ্রুপ লিংক", "value": "https://t.me/+OvozYu7R1EczMGJl", "required": false },
-    "SUPPORT_CHANNEL": { "description": "সাপোর্ট চ্যানেল লিংক", "value": "https://t.me/RupkothaGolpo", "required": false }
+    "LOG_GROUP_ID": { "description": "Log group ID (বটকে admin করতে হবে)", "value": "", "required": true },
+    "SUPPORT_GROUP": { "description": "সাপোর্ট গ্রুপ লিংক", "value": "", "required": false },
+    "SUPPORT_CHANNEL": { "description": "সাপোর্ট চ্যানেল লিংক", "value": "", "required": false },
+    "YT_COOKIES": { "description": "YouTube cookies (Netscape format) — bot detection bypass", "value": "", "required": false }
   },
   "buildpacks": [
     { "url": "heroku/nodejs" },

@@ -69,7 +69,7 @@ async def main():
             f"🕐 <b>সময়:</b> <code>{asyncio.get_event_loop().time()}</code>\n"
             f"👨‍💻 <b>মালিক:</b> @{config.OWNER_USERNAME}\n\n"
             f"<b>Features:</b>\n"
-            f"✓ Multi-Platform Music (JioSaavn, SoundCloud, YouTube, Piped)\n"
+            f"✓ Multi-Platform Music (JioSaavn, SoundCloud, YouTube, Piped, Invidious)\n"
             f"✓ Audio & Video Streaming\n"
             f"✓ Auto Queue & Auto-Play Next\n"
             f"✓ Spotify/Apple Music/JioSaavn Link Support\n"
