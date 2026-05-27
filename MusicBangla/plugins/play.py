@@ -8,6 +8,7 @@ from collections import deque
 from pyrogram import filters
 from pyrogram.types import Message
 from pytgcalls.types import MediaStream
+from pytgcalls import filters as ptg_filters
 
 import config
 from MusicBangla import app, assistant, calls, LOGGER
@@ -778,7 +779,7 @@ async def play_next_in_queue(chat_id: int):
         await play_next_in_queue(chat_id)
 
 
-@calls.on_stream_end()
+@calls.on_update(ptg_filters.stream_end)
 async def _on_stream_end(client, update):
     """Auto-play next song from queue when current one ends."""
     chat_id = update.chat_id

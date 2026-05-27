@@ -17,7 +17,7 @@ async def react(client, message, emoji):
 async def pause_cmd(client, message: Message):
     await react(client, message, "⏸")
     try:
-        await calls.pause_stream(message.chat.id)
+        await calls.pause(message.chat.id)
         await message.reply_text("⏸ <b>গান পজ করা হলো।</b>")
     except Exception as e:
         LOGGER.error(e)
@@ -28,7 +28,7 @@ async def pause_cmd(client, message: Message):
 async def resume_cmd(client, message: Message):
     await react(client, message, "▶️")
     try:
-        await calls.resume_stream(message.chat.id)
+        await calls.resume(message.chat.id)
         await message.reply_text("▶️ <b>গান আবার চালু হলো।</b>")
     except Exception as e:
         LOGGER.error(e)
