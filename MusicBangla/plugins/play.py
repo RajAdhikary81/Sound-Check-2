@@ -24,21 +24,92 @@ _MAX_CONCURRENT = 3  # max concurrent plays
 
 # --- Cookies ---
 # Write YT_COOKIES env var to file if it exists (for Heroku deployments)
+# Heroku env vars can mangle tab characters, so we fix Netscape cookie format
 _COOKIE_FILE = None
-if os.environ.get("YT_COOKIES"):
+
+
+def _fix_cookie_line(line: str) -> str:
+    """Fix a single cookie line to proper Netscape format (tab-separated, 7 fields)"""
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return line
+    # Split on any whitespace and rejoin with tabs (Netscape format requires tabs)
+    parts = line.split()
+    if len(parts) >= 7:
+        # Standard: domain, flag, path, secure, expiry, name, value
+        # Value might contain spaces, so rejoin everything from index 6 onward
+        fixed = "\t".join(parts[:6]) + "\t" + " ".join(parts[6:])
+        return fixed
+    elif len(parts) == 6:
+        # Some cookies have empty value
+        return "\t".join(parts) + "\t"
+    return line
+
+
+def _write_cookies_from_env():
+    """Write YT_COOKIES env var to cookies.txt with proper Netscape format"""
+    raw = os.environ.get("YT_COOKIES", "")
+    if not raw:
+        return None
+
+    lines = raw.replace("\\n", "\n").split("\n")
+    fixed_lines = []
+    has_header = False
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if "Netscape" in line or "HTTP Cookie" in line:
+            has_header = True
+            fixed_lines.append("# Netscape HTTP Cookie File")
+            continue
+        if line.startswith("#"):
+            fixed_lines.append(line)
+            continue
+        # Cookie data line
+        fixed_lines.append(_fix_cookie_line(line))
+
+    if not has_header:
+        fixed_lines.insert(0, "# Netscape HTTP Cookie File")
+
+    cookie_count = sum(1 for l in fixed_lines if l and not l.startswith("#"))
+
     try:
         with open("cookies.txt", "w") as f:
-            f.write(os.environ["YT_COOKIES"])
-        _COOKIE_FILE = "cookies.txt"
-        LOGGER.info("cookies.txt written from YT_COOKIES env var")
+            f.write("\n".join(fixed_lines) + "\n")
+        LOGGER.info(f"cookies.txt written: {cookie_count} cookies from YT_COOKIES env var")
+        # Log first cookie domain for debug (safe — no secrets)
+        for l in fixed_lines:
+            if l and not l.startswith("#"):
+                domain = l.split("\t")[0] if "\t" in l else "?"
+                LOGGER.info(f"  First cookie domain: {domain}")
+                break
+        return "cookies.txt"
     except Exception as e:
-        LOGGER.error(f"Failed to write cookies.txt from env: {e}")
+        LOGGER.error(f"Failed to write cookies.txt: {e}")
+        return None
+
+
+if os.environ.get("YT_COOKIES"):
+    _COOKIE_FILE = _write_cookies_from_env()
 elif os.path.exists("cookies.txt"):
     _COOKIE_FILE = "cookies.txt"
-    LOGGER.info("cookies.txt loaded from file")
+    LOGGER.info("cookies.txt loaded from existing file")
 
 if not _COOKIE_FILE:
     LOGGER.warning("No YouTube cookies available — playback may fail!")
+else:
+    # Validate cookie file
+    try:
+        with open(_COOKIE_FILE, "r") as f:
+            content = f.read()
+        tab_lines = [l for l in content.split("\n") if "\t" in l and not l.startswith("#")]
+        LOGGER.info(f"Cookie file validated: {len(tab_lines)} tab-formatted cookie lines")
+        if tab_lines:
+            LOGGER.info(f"  Sample format check: {len(tab_lines[0].split(chr(9)))} fields (need 7)")
+    except Exception as e:
+        LOGGER.warning(f"Cookie validation error: {e}")
 
 
 # =====================================================
@@ -51,7 +122,7 @@ def _base_opts():
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "socket_timeout": 15,
+        "socket_timeout": 20,
         "retries": 5,
         "fragment_retries": 5,
         "geo_bypass": True,
@@ -60,7 +131,10 @@ def _base_opts():
         "check_formats": False,
         "source_address": "0.0.0.0",
         "format_sort": ["abr", "asr"],
-        "extractor_args": {"youtube": {"player_skip": ["configs"]}},
+        # User-Agent helps avoid bot detection
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        },
     }
     if _COOKIE_FILE:
         opts["cookiefile"] = _COOKIE_FILE
@@ -161,9 +235,9 @@ def yt_search_sync(query: str):
 # =====================================================
 
 _COBALT_APIS = [
-    "https://cobalt-api.ayo.tf",
-    "https://cobalt.api.timelessnesses.me",
-    "https://api.cobalt.best",
+    "https://api.cobalt.tools",
+    "https://cobalt-api.kwiatekmiki.com",
+    "https://cobalt.canine.tools",
 ]
 
 
@@ -204,53 +278,60 @@ def _cobalt_get_url(youtube_url: str, video: bool = False) -> str:
 
 
 # =====================================================
-# PIPED API FALLBACK
+# INVIDIOUS API FALLBACK
 # =====================================================
 
-_PIPED_APIS = [
-    "https://pipedapi.kavin.rocks",
-    "https://piped-api.privacy.com.de",
-    "https://api.piped.yt",
+_INVIDIOUS_APIS = [
+    "https://inv.nadeko.net",
+    "https://invidious.nerdvpn.de",
+    "https://invidious.jing.rocks",
+    "https://iv.nbohr.de",
 ]
 
 
-def _piped_get_url(video_id: str, video: bool = False) -> str:
-    """Get stream URL via Piped API"""
-    for api_base in _PIPED_APIS:
+def _invidious_get_url(video_id: str, video: bool = False) -> str:
+    """Get stream URL via Invidious API"""
+    for api_base in _INVIDIOUS_APIS:
         try:
-            LOGGER.info(f"Piped attempt: {api_base}")
+            LOGGER.info(f"Invidious attempt: {api_base}")
             with httpx.Client(timeout=15, follow_redirects=True) as client:
-                resp = client.get(f"{api_base}/streams/{video_id}")
+                resp = client.get(
+                    f"{api_base}/api/v1/videos/{video_id}",
+                    params={"fields": "adaptiveFormats,formatStreams"},
+                )
                 if resp.status_code == 200:
                     data = resp.json()
                     if not video:
-                        # Get audio stream
-                        streams = data.get("audioStreams", [])
-                        if streams:
-                            # Sort by bitrate, pick best
-                            streams.sort(key=lambda x: x.get("bitrate", 0), reverse=True)
-                            url = streams[0].get("url")
+                        # Get audio from adaptive formats
+                        adaptive = data.get("adaptiveFormats", [])
+                        audio_streams = [s for s in adaptive if s.get("type", "").startswith("audio/")]
+                        if audio_streams:
+                            # Sort by bitrate
+                            audio_streams.sort(key=lambda x: int(x.get("bitrate", "0")), reverse=True)
+                            url = audio_streams[0].get("url")
                             if url:
-                                LOGGER.info(f"Piped audio success from {api_base}")
+                                LOGGER.info(f"Invidious audio success from {api_base}")
                                 return url
                     else:
-                        # Get video stream
-                        streams = data.get("videoStreams", [])
-                        # Filter <=720p with audio
-                        good = [s for s in streams if s.get("videoOnly") is False and (s.get("height", 9999) <= 720)]
-                        if not good:
-                            good = [s for s in streams if s.get("height", 9999) <= 720]
-                        if not good:
-                            good = streams
-                        if good:
-                            url = good[0].get("url")
+                        # Get video from format streams (pre-muxed)
+                        streams = data.get("formatStreams", [])
+                        if streams:
+                            # Pick 720p or best available
+                            for s in streams:
+                                if "720" in s.get("qualityLabel", ""):
+                                    url = s.get("url")
+                                    if url:
+                                        LOGGER.info(f"Invidious video 720p from {api_base}")
+                                        return url
+                            # Fallback to first available
+                            url = streams[0].get("url")
                             if url:
-                                LOGGER.info(f"Piped video success from {api_base}")
+                                LOGGER.info(f"Invidious video success from {api_base}")
                                 return url
                 else:
-                    LOGGER.warning(f"Piped {api_base} HTTP {resp.status_code}")
+                    LOGGER.warning(f"Invidious {api_base} HTTP {resp.status_code}")
         except Exception as e:
-            LOGGER.warning(f"Piped {api_base} error: {str(e)[:60]}")
+            LOGGER.warning(f"Invidious {api_base} error: {str(e)[:60]}")
         time.sleep(1)
 
     return None
@@ -267,9 +348,7 @@ def _ytdlp_get_url(url: str, video: bool) -> str:
         opts = _base_opts()
         opts["format"] = fmt_str
         if player_client:
-            yt_args = opts.get("extractor_args", {}).get("youtube", {}).copy()
-            yt_args["player_client"] = player_client
-            opts["extractor_args"] = {"youtube": yt_args}
+            opts["extractor_args"] = {"youtube": {"player_client": player_client}}
 
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -367,7 +446,7 @@ def get_media(url: str, video: bool):
     4-layer fallback system:
       1. yt-dlp stream URL (multiple player clients)
       2. Cobalt API (public instances)
-      3. Piped API (public instances)
+      3. Invidious API (public instances)
       4. yt-dlp download (file to disk)
     """
     # Extract video ID for API fallbacks
@@ -388,12 +467,12 @@ def get_media(url: str, video: bool):
         LOGGER.info("Layer 2 SUCCESS (Cobalt)")
         return result
 
-    # --- Layer 3: Piped API ---
+    # --- Layer 3: Invidious API ---
     if video_id:
-        LOGGER.info("Layer 3: Piped API")
-        result = _piped_get_url(video_id, video)
+        LOGGER.info("Layer 3: Invidious API")
+        result = _invidious_get_url(video_id, video)
         if result:
-            LOGGER.info("Layer 3 SUCCESS (Piped)")
+            LOGGER.info("Layer 3 SUCCESS (Invidious)")
             return result
 
     # --- Layer 4: yt-dlp download to disk ---
