@@ -2,6 +2,7 @@ import asyncio
 from pyrogram import filters
 from pyrogram.types import Message
 
+import config
 from MusicBangla import app, calls, LOGGER
 from MusicBangla.plugins.play import ACTIVE_CHATS, QUEUES, play_next_in_queue
 
@@ -21,7 +22,7 @@ async def pause_cmd(client, message: Message):
         await message.reply_text("⏸ <b>গান পজ করা হলো।</b>")
     except Exception as e:
         LOGGER.error(e)
-        await message.reply_text("❌ পজ করা যাচ্ছে না — কোনো গান বাজছে কি?")
+        await message.reply_text(f"{config.random_error_emoji()} পজ করা যাচ্ছে না — কোনো গান বাজছে কি?")
 
 
 @app.on_message(filters.command("resume") & filters.group)
@@ -32,7 +33,7 @@ async def resume_cmd(client, message: Message):
         await message.reply_text("▶️ <b>গান আবার চালু হলো।</b>")
     except Exception as e:
         LOGGER.error(e)
-        await message.reply_text("❌ Resume করা যাচ্ছে না।")
+        await message.reply_text(f"{config.random_error_emoji()} Resume করা যাচ্ছে না।")
 
 
 @app.on_message(filters.command(["skip", "next"]) & filters.group)
@@ -43,7 +44,6 @@ async def skip_cmd(client, message: Message):
     queue = QUEUES.get(chat_id, [])
 
     try:
-        # First try to leave the current call cleanly
         try:
             await calls.leave_call(chat_id)
         except Exception:
@@ -54,7 +54,10 @@ async def skip_cmd(client, message: Message):
                 f"⏭ <b>স্কিপ!</b> পরবর্তী গান লোড হচ্ছে...\n"
                 f"📋 কিউতে বাকি: {len(queue)} টি"
             )
-            # Explicitly trigger next song (don't rely on on_stream_end)
+            try:
+                await message.reply_sticker(config.random_queue_sticker())
+            except Exception:
+                pass
             await asyncio.sleep(1)
             await play_next_in_queue(chat_id)
         else:
@@ -65,7 +68,7 @@ async def skip_cmd(client, message: Message):
             )
     except Exception as e:
         LOGGER.error(e)
-        await message.reply_text("❌ স্কিপ করা যাচ্ছে না।")
+        await message.reply_text(f"{config.random_error_emoji()} স্কিপ করা যাচ্ছে না।")
 
 
 @app.on_message(filters.command(["stop", "end"]) & filters.group)
@@ -76,7 +79,6 @@ async def stop_cmd(client, message: Message):
 
     try:
         ACTIVE_CHATS.pop(chat_id, None)
-        # Clear queue so on_stream_end doesn't auto-play
         if chat_id in QUEUES:
             QUEUES[chat_id].clear()
         try:
@@ -87,6 +89,10 @@ async def stop_cmd(client, message: Message):
             "🛑 <b>স্ট্রিম বন্ধ ও কিউ পরিষ্কার।</b>\n"
             "ধন্যবাদ গান উপভোগ করার জন্য 💝"
         )
+        try:
+            await message.reply_sticker(config.random_stop_sticker())
+        except Exception:
+            pass
     except Exception as e:
         LOGGER.error(e)
-        await message.reply_text("❌ স্টপ করা যাচ্ছে না।")
+        await message.reply_text(f"{config.random_error_emoji()} স্টপ করা যাচ্ছে না।")

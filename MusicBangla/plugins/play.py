@@ -402,63 +402,81 @@ def _jiosaavn_search_and_download(query: str, video: bool):
 
 def _youtube_search(query: str):
     """Search YouTube via yt-dlp flat search."""
-    try:
-        opts = _base_opts()
-        opts["extract_flat"] = True
-        if _COOKIE_FILE:
-            opts["cookiefile"] = _COOKIE_FILE
-            opts["extractor_args"] = {"youtube": {"player_client": ["web_creator"]}}
+    # Try multiple search strategies
+    search_strategies = []
+    if _COOKIE_FILE:
+        search_strategies.append((_COOKIE_FILE, ["web_creator"], "cookies+web_creator"))
+    search_strategies.append((None, ["mediaconnect"], "mediaconnect"))
+    search_strategies.append((None, ["web_creator"], "web_creator"))
+    search_strategies.append((None, None, "default"))
 
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(f"ytsearch3:{query}", download=False)
+    for cookie, player_client, desc in search_strategies:
+        try:
+            opts = _base_opts()
+            opts["extract_flat"] = True
+            if cookie:
+                opts["cookiefile"] = cookie
+            if player_client:
+                opts["extractor_args"] = {"youtube": {"player_client": player_client}}
 
-            entries = []
-            if info and info.get("_type") == "playlist" and info.get("entries"):
-                entries = list(info["entries"])
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(f"ytsearch3:{query}", download=False)
 
-            if not entries:
-                return None
+                entries = []
+                if info and info.get("_type") == "playlist" and info.get("entries"):
+                    entries = list(info["entries"])
 
-            best = _pick_best_match(entries, query) or entries[0]
-            vid = best.get("id") or best.get("url", "")
-            return {
-                "title": best.get("title", "Unknown"),
-                "duration": int(best.get("duration", 0) or 0),
-                "link": f"https://www.youtube.com/watch?v={vid}",
-                "thumb": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
-                "channel": best.get("channel", "") or best.get("uploader", "YouTube"),
-                "id": vid,
-                "source": "YouTube",
-            }
-    except Exception as e:
-        LOGGER.error(f"YT search error: {e}")
-        return None
+                if not entries:
+                    continue
+
+                best = _pick_best_match(entries, query) or entries[0]
+                vid = best.get("id") or best.get("url", "")
+                LOGGER.info(f"YT search OK [{desc}]: {best.get('title', '?')}")
+                return {
+                    "title": best.get("title", "Unknown"),
+                    "duration": int(best.get("duration", 0) or 0),
+                    "link": f"https://www.youtube.com/watch?v={vid}",
+                    "thumb": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                    "channel": best.get("channel", "") or best.get("uploader", "YouTube"),
+                    "id": vid,
+                    "source": "YouTube",
+                }
+        except Exception as e:
+            LOGGER.warning(f"YT search [{desc}]: {str(e)[:80]}")
+            continue
+
+    return None
 
 
 def _youtube_download(url: str, video: bool) -> str:
-    """Download from YouTube. Try multiple client strategies."""
+    """Download from YouTube using multiple client strategies including
+    mediaconnect (no cookies needed, bypasses bot detection)."""
     cleanup_downloads()
     suffix = "_v" if video else ""
     outtmpl = f"downloads/yt_%(id)s{suffix}.%(ext)s"
 
     if video:
-        fmt = "best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best"
+        fmt = (
+            "best[height<=480][ext=mp4]/best[height<=480][ext=webm]/"
+            "best[height<=480]/best[ext=mp4]/best"
+        )
     else:
         fmt = (
-            "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio[ext=webm]/"
-            "bestaudio[ext=opus]/bestaudio/best[height<=360]/"
-            "worst[ext=mp4]/worst/best"
+            "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio[ext=opus]/"
+            "bestaudio[ext=webm]/bestaudio/best[height<=360]/best"
         )
 
+    # mediaconnect client bypasses bot detection without cookies
     strategies = []
+    strategies.append((None, ["mediaconnect"], "mediaconnect"))
     if _COOKIE_FILE:
         strategies.append((_COOKIE_FILE, ["web_creator"], "cookies+web_creator"))
         strategies.append((_COOKIE_FILE, ["ios"], "cookies+ios"))
-        strategies.append((_COOKIE_FILE, ["mweb"], "cookies+mweb"))
+        strategies.append((_COOKIE_FILE, ["web"], "cookies+web"))
     strategies.append((None, ["web_creator"], "web_creator"))
     strategies.append((None, ["ios"], "ios"))
-    strategies.append((None, ["mweb"], "mweb"))
     strategies.append((None, ["tv"], "tv"))
+    strategies.append((None, ["mweb"], "mweb"))
     strategies.append((None, None, "default"))
 
     for cookie, player_client, desc in strategies:
@@ -483,9 +501,14 @@ def _youtube_download(url: str, video: bool) -> str:
                             LOGGER.info(f"YT OK [{desc}]: {fpath}")
                             return fpath
                 if os.path.exists(fname) and os.path.getsize(fname) > 5000:
+                    LOGGER.info(f"YT OK [{desc}]: {fname}")
                     return fname
         except Exception as e:
-            LOGGER.warning(f"YT [{desc}]: {str(e)[:120]}")
+            emsg = str(e)[:120]
+            LOGGER.warning(f"YT [{desc}]: {emsg}")
+            # If bot detection, skip cookie-less strategies that will also fail
+            if "Sign in to confirm" in emsg and not cookie:
+                continue
         time.sleep(0.3)
 
     return None
@@ -889,9 +912,15 @@ async def ensure_assistant(chat_id: int):
 
 async def try_play_stream(chat_id, media_path, video, max_retries=4):
     if video:
-        stream = MediaStream(media_path, video_flags=MediaStream.Flags.AUTO_DETECT)
+        stream = MediaStream(
+            media_path,
+            video_flags=MediaStream.Flags.AUTO_DETECT,
+        )
     else:
-        stream = MediaStream(media_path, video_flags=MediaStream.Flags.IGNORE)
+        stream = MediaStream(
+            media_path,
+            video_flags=MediaStream.Flags.IGNORE,
+        )
 
     last_error = None
     for attempt in range(1, max_retries + 1):
@@ -909,6 +938,22 @@ async def try_play_stream(chat_id, media_path, video, max_retries=4):
                 return "NO_VC"
             elif "chat_admin_required" in err or "not found" in err:
                 return "NO_PERM"
+            elif "file_part" in err or "file_reference" in err:
+                # File issue — retry with fresh stream
+                if video:
+                    stream = MediaStream(
+                        media_path,
+                        video_flags=MediaStream.Flags.AUTO_DETECT,
+                    )
+                else:
+                    stream = MediaStream(
+                        media_path,
+                        video_flags=MediaStream.Flags.IGNORE,
+                    )
+                if attempt < max_retries:
+                    await asyncio.sleep(2)
+                    continue
+                return f"ERROR: {str(e)[:100]}"
             else:
                 if attempt < max_retries:
                     await asyncio.sleep(3)
@@ -1223,7 +1268,7 @@ async def _play(client, message: Message, video: bool):
 
     # --- Nothing playing -> play now ---
     status = await message.reply_text(
-        "<b>খুঁজছি...</b> 🔍"
+        f"{config.random_search_emoji()} <b>খুঁজছি...</b>"
     )
 
     try:
@@ -1325,7 +1370,7 @@ async def _play(client, message: Message, video: bool):
 
         # Multi-source search and download
         await status.edit(
-            f"📥 <b>ডাউনলোড হচ্ছে...</b>\n"
+            f"{config.random_download_emoji()} <b>ডাউনলোড হচ্ছে...</b>\n"
             f"🔎 <code>{search_query[:50]}</code>"
         )
 
