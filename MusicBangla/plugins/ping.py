@@ -53,20 +53,20 @@ async def debug_cmd(client, message: Message):
     else:
         lines.append("📗 <b>Node.js:</b> ❌ না পাওয়া গেছে")
 
-    # yt-dlp format test with android_vr
+    # yt-dlp format test with web client
     try:
         opts = {
             "quiet": True,
             "no_warnings": True,
             "format": "bestaudio/best",
             "no_check_formats": True,
-            "extractor_args": {"youtube": {"player_client": ["android_vr"]}},
+            "extractor_args": {"youtube": {"player_client": ["web"]}},
         }
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info("https://www.youtube.com/watch?v=dQw4w9WgXcQ", download=False)
             fmt = info.get("format", "?")
             url_ok = "✅" if info.get("url") else "⚠️ no url"
-            lines.append(f"🎵 <b>yt-dlp test (android_vr):</b> {url_ok} <code>{fmt}</code>")
+            lines.append(f"🎵 <b>yt-dlp test (web):</b> {url_ok} <code>{fmt}</code>")
     except Exception as e:
         lines.append(f"🎵 <b>yt-dlp test:</b> ❌ <code>{str(e)[:80]}</code>")
 
@@ -91,8 +91,9 @@ async def debug_cmd(client, message: Message):
     except Exception as e:
         lines.append(f"🌐 <b>Piped API:</b> ❌ <code>{str(e)[:50]}</code>")
 
-    lines.append(f"\n📌 <b>Build:</b> <code>v10-4layer-fallback</code>")
-    lines.append(f"🛡 <b>Features:</b> 4-layer fallback, rate-limit, anti-flood, input sanitize")
+    lines.append(f"\n📌 <b>Build:</b> <code>v11-multiplatform-4layer</code>")
+    lines.append(f"🛡 <b>Features:</b> JioSaavn + SoundCloud + YouTube + Piped, rate-limit, anti-flood")
+    lines.append(f"🌐 <b>Sources:</b> JioSaavn, SoundCloud, YouTube (web/mweb/android), Piped API")
 
     await message.reply_text("\n".join(lines))
 
