@@ -47,9 +47,19 @@ def _fix_cookie_line(line: str) -> str:
         return "\t".join(parts) + "\t"
     return line
 
-if os.environ.get("YT_COOKIES"):
+
+def load_cookies_from_env() -> bool:
+    """Load/reload cookies from YT_COOKIES env var. Returns True if loaded."""
+    global _COOKIE_FILE
+    raw_cookies = os.environ.get("YT_COOKIES", "")
+    if not raw_cookies:
+        if os.path.exists("cookies.txt"):
+            _COOKIE_FILE = "cookies.txt"
+            return True
+        return False
+
     try:
-        raw = os.environ["YT_COOKIES"].replace("\\n", "\n")
+        raw = raw_cookies.replace("\\n", "\n")
         lines = raw.split("\n")
         fixed = ["# Netscape HTTP Cookie File"]
         for line in lines:
@@ -65,10 +75,14 @@ if os.environ.get("YT_COOKIES"):
         _COOKIE_FILE = "cookies.txt"
         cookie_count = sum(1 for l in fixed if l and not l.startswith("#"))
         LOGGER.info(f"YouTube cookies loaded: {cookie_count} cookies")
+        return True
     except Exception as e:
         LOGGER.error(f"Cookie write error: {e}")
-elif os.path.exists("cookies.txt"):
-    _COOKIE_FILE = "cookies.txt"
+        return False
+
+
+# Load cookies on startup
+load_cookies_from_env()
 
 
 # =====================================================
@@ -1516,3 +1530,176 @@ async def clearqueue_cmd(client, message: Message):
         )
     else:
         await message.reply_text("<b>কিউ আগে থেকেই খালি!</b>")
+
+
+# =====================================================
+# COOKIE MANAGEMENT COMMANDS (owner only)
+# =====================================================
+
+@app.on_message(filters.command("refreshcookies") & filters.user(config.OWNER_ID))
+async def refresh_cookies_cmd(client, message: Message):
+    """Reload cookies from YT_COOKIES env var without restarting bot."""
+    result = load_cookies_from_env()
+    if result and _COOKIE_FILE:
+        try:
+            with open(_COOKIE_FILE) as f:
+                lines = [l for l in f.readlines() if l.strip() and not l.startswith("#")]
+            await message.reply_text(
+                f"✅ <b>Cookies রিফ্রেশ হয়েছে!</b>\n\n"
+                f"🍪 মোট cookies: <code>{len(lines)}</code>\n"
+                f"📁 ফাইল: <code>{_COOKIE_FILE}</code>\n\n"
+                f"YouTube এখন cookies সহ কাজ করবে।"
+            )
+        except Exception:
+            await message.reply_text("✅ <b>Cookies রিফ্রেশ হয়েছে!</b>")
+    else:
+        await message.reply_text(
+            "❌ <b>Cookies পাওয়া যায়নি!</b>\n\n"
+            "Heroku Config Vars-এ <code>YT_COOKIES</code> সেট করুন।\n\n"
+            "<b>কিভাবে করবেন:</b>\n"
+            "1. Chrome-এ YouTube-এ login করুন\n"
+            "2. <b>Get cookies.txt LOCALLY</b> extension ইন্সটল করুন\n"
+            "3. youtube.com-এ গিয়ে Export করুন\n"
+            "4. cookies.txt-এর সম্পূর্ণ content কপি করুন\n"
+            "5. Heroku Dashboard > Settings > Config Vars\n"
+            "6. <code>YT_COOKIES</code> এ paste করুন\n"
+            "7. <code>/refreshcookies</code> দিন"
+        )
+
+
+@app.on_message(filters.command("setcookies") & filters.private & filters.user(config.OWNER_ID))
+async def set_cookies_cmd(client, message: Message):
+    """Set cookies directly via message (private chat only for security)."""
+    global _COOKIE_FILE
+
+    if len(message.command) < 2 and not message.reply_to_message:
+        return await message.reply_text(
+            "🍪 <b>Cookies সেট করতে:</b>\n\n"
+            "<b>পদ্ধতি ১:</b> cookies.txt-এর content সরাসরি পাঠান:\n"
+            "<code>/setcookies\n"
+            ".youtube.com\tTRUE\t/\tTRUE\t...\tSID\t...</code>\n\n"
+            "<b>পদ্ধতি ২:</b> cookies.txt ফাইল reply করে:\n"
+            "<code>/setcookies</code>"
+        )
+
+    cookie_text = ""
+
+    # Check if replying to a document
+    if message.reply_to_message and message.reply_to_message.document:
+        try:
+            doc = message.reply_to_message.document
+            fpath = await message.reply_to_message.download()
+            with open(fpath, "r") as f:
+                cookie_text = f.read()
+            os.remove(fpath)
+        except Exception as e:
+            return await message.reply_text(f"❌ ফাইল পড়া যায়নি: {str(e)[:80]}")
+    else:
+        # Get from command text
+        cookie_text = message.text.split(None, 1)[1] if len(message.command) > 1 else ""
+        if not cookie_text and message.reply_to_message:
+            cookie_text = message.reply_to_message.text or ""
+
+    if not cookie_text or len(cookie_text) < 50:
+        return await message.reply_text("❌ <b>Cookie data খুব ছোট বা খালি!</b>")
+
+    try:
+        lines = cookie_text.replace("\\n", "\n").split("\n")
+        fixed = ["# Netscape HTTP Cookie File"]
+        for line in lines:
+            line = line.strip()
+            if not line or "Netscape" in line or "HTTP Cookie" in line:
+                continue
+            if line.startswith("#"):
+                fixed.append(line)
+                continue
+            fixed.append(_fix_cookie_line(line))
+
+        cookie_count = sum(1 for l in fixed if l and not l.startswith("#"))
+        if cookie_count == 0:
+            return await message.reply_text("❌ <b>কোনো valid cookie পাওয়া যায়নি!</b>")
+
+        with open("cookies.txt", "w") as f:
+            f.write("\n".join(fixed) + "\n")
+        _COOKIE_FILE = "cookies.txt"
+
+        # Test the cookies with a quick YouTube check
+        test_ok = False
+        try:
+            opts = _base_opts()
+            opts["extract_flat"] = True
+            opts["cookiefile"] = _COOKIE_FILE
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.extract_info("ytsearch1:test", download=False)
+            test_ok = True
+        except Exception:
+            pass
+
+        status = "✅ YouTube টেস্ট সফল!" if test_ok else "⚠️ YouTube টেস্ট ব্যর্থ — cookies সমস্যা থাকতে পারে"
+
+        await message.reply_text(
+            f"🍪 <b>Cookies সেট হয়েছে!</b>\n\n"
+            f"📊 মোট cookies: <code>{cookie_count}</code>\n"
+            f"📁 ফাইল: <code>cookies.txt</code>\n"
+            f"{status}\n\n"
+            f"💡 <b>টিপস:</b>\n"
+            f"• Heroku-তে permanent করতে Config Vars-এ <code>YT_COOKIES</code> এও paste করুন\n"
+            f"• Cookies expire হলে আবার <code>/setcookies</code> দিন"
+        )
+
+        # Delete the message containing cookies for security
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
+    except Exception as e:
+        await message.reply_text(f"❌ Cookie সেট করতে সমস্যা: <code>{str(e)[:80]}</code>")
+
+
+@app.on_message(filters.command("cookiestatus") & filters.user(config.OWNER_ID))
+async def cookie_status_cmd(client, message: Message):
+    """Check current cookie status."""
+    if _COOKIE_FILE and os.path.exists(_COOKIE_FILE):
+        try:
+            with open(_COOKIE_FILE) as f:
+                content = f.read()
+            lines = [l for l in content.split("\n") if l.strip() and not l.startswith("#")]
+            fsize = os.path.getsize(_COOKIE_FILE)
+
+            # Check if cookies are YouTube cookies
+            yt_cookies = sum(1 for l in lines if ".youtube.com" in l or ".google.com" in l)
+
+            # Test cookies
+            test_ok = False
+            try:
+                opts = _base_opts()
+                opts["extract_flat"] = True
+                opts["cookiefile"] = _COOKIE_FILE
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    ydl.extract_info("ytsearch1:test", download=False)
+                test_ok = True
+            except Exception:
+                pass
+
+            status_icon = "🟢" if test_ok else "🔴"
+            status_text = "কাজ করছে" if test_ok else "কাজ করছে না (expired/invalid)"
+
+            await message.reply_text(
+                f"🍪 <b>Cookie Status</b>\n\n"
+                f"📁 ফাইল: <code>{_COOKIE_FILE}</code>\n"
+                f"📊 মোট entries: <code>{len(lines)}</code>\n"
+                f"🌐 YouTube cookies: <code>{yt_cookies}</code>\n"
+                f"💾 সাইজ: <code>{fsize}</code> bytes\n"
+                f"{status_icon} Status: <b>{status_text}</b>\n\n"
+                f"🔄 রিফ্রেশ: <code>/refreshcookies</code>\n"
+                f"📝 নতুন সেট: <code>/setcookies</code>"
+            )
+        except Exception as e:
+            await message.reply_text(f"❌ Cookie চেক করতে সমস্যা: {str(e)[:80]}")
+    else:
+        await message.reply_text(
+            "🍪 <b>কোনো cookie সেট নেই!</b>\n\n"
+            "📝 সেট করুন: <code>/setcookies</code> (private chat-এ)\n"
+            "🔄 অথবা Heroku Config Vars-এ <code>YT_COOKIES</code> সেট করে <code>/refreshcookies</code> দিন"
+        )
