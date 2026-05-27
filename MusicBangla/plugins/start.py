@@ -62,8 +62,9 @@ async def start_private(client, message: Message):
             f"▫️ <code>/games</code> — গেম মেনু\n"
             f"▫️ <code>/ping</code> — বটের স্ট্যাটাস\n\n"
             f"🌐 <b>সাপোর্টেড সোর্স:</b>\n"
-            f"JioSaavn | SoundCloud | YouTube | Piped\n"
-            f"Spotify | Apple Music | Gaana | Deezer লিংকও চলে!\n\n"
+            f"YouTube | SoundCloud | Spotify | Apple Music\n"
+            f"JioSaavn | Gaana | Deezer | Tidal | Amazon Music\n"
+            f"Wynk | Resso | YouTube Music — সব লিংক চলে!\n\n"
             f"💝 <b>মালিক:</b> @{config.OWNER_USERNAME}\n"
             f"📢 <b>চ্যানেল:</b> {config.SUPPORT_CHANNEL}"
         )

@@ -2,6 +2,7 @@ import os
 import asyncio
 import time
 import re
+import random
 import yt_dlp
 import httpx
 from collections import deque
@@ -71,11 +72,29 @@ elif os.path.exists("cookies.txt"):
 
 
 # =====================================================
+# COLORFUL BUTTON THEMES (rotating colors)
+# =====================================================
+
+_BUTTON_THEMES = [
+    {"song": "🔗", "add": "➕", "channel": "📢", "support": "💬", "owner": "👨‍💻", "close": "❌"},
+    {"song": "🎵", "add": "🌟", "channel": "🔔", "support": "💖", "owner": "🧑‍🎤", "close": "🚫"},
+    {"song": "🎧", "add": "✨", "channel": "📣", "support": "💜", "owner": "🎤", "close": "🔴"},
+    {"song": "🎶", "add": "🌈", "channel": "📡", "support": "💙", "owner": "🎸", "close": "⛔"},
+    {"song": "💿", "add": "🔥", "channel": "🎺", "support": "💚", "owner": "🎹", "close": "🛑"},
+    {"song": "🎼", "add": "⭐", "channel": "📻", "support": "🧡", "owner": "🎻", "close": "❎"},
+    {"song": "🎙️", "add": "💫", "channel": "🎷", "support": "💛", "owner": "🎯", "close": "🔻"},
+]
+
+def _get_theme():
+    return random.choice(_BUTTON_THEMES)
+
+
+# =====================================================
 # YT-DLP BASE OPTIONS
 # =====================================================
 
 def _base_opts():
-    return {
+    opts = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
@@ -87,6 +106,7 @@ def _base_opts():
         "no_check_formats": True,
         "check_formats": False,
         "source_address": "0.0.0.0",
+        "extractor_retries": 3,
         "http_headers": {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -96,6 +116,7 @@ def _base_opts():
             "Accept-Language": "en-US,en;q=0.9",
         },
     }
+    return opts
 
 
 def cleanup_downloads():
@@ -112,31 +133,32 @@ def cleanup_downloads():
 
 
 # =====================================================
-# INLINE BUTTONS for now-playing message
+# INLINE BUTTONS for now-playing message (COLORFUL)
 # =====================================================
 
 def _play_buttons(song_link: str = "") -> InlineKeyboardMarkup:
+    t = _get_theme()
     rows = []
     row1 = []
     if song_link and song_link.startswith("http"):
-        row1.append(InlineKeyboardButton("🔗 গান দেখো", url=song_link))
+        row1.append(InlineKeyboardButton(f"{t['song']} গান দেখো", url=song_link))
     row1.append(
         InlineKeyboardButton(
-            "➕ গ্রুপে যোগ করো",
+            f"{t['add']} গ্রুপে যোগ করো",
             url="https://t.me/MusicBanglaBot?startgroup=true",
         )
     )
     rows.append(row1)
     rows.append([
-        InlineKeyboardButton("📢 চ্যানেল", url=config.SUPPORT_CHANNEL),
-        InlineKeyboardButton("💬 সাপোর্ট", url=config.SUPPORT_GROUP),
+        InlineKeyboardButton(f"{t['channel']} চ্যানেল", url=config.SUPPORT_CHANNEL),
+        InlineKeyboardButton(f"{t['support']} সাপোর্ট", url=config.SUPPORT_GROUP),
     ])
     rows.append([
         InlineKeyboardButton(
-            "👨‍💻 মালিক",
+            f"{t['owner']} মালিক",
             url=f"https://t.me/{config.OWNER_USERNAME}",
         ),
-        InlineKeyboardButton("❌ বন্ধ করো", callback_data="close_play_msg"),
+        InlineKeyboardButton(f"{t['close']} বন্ধ করো", callback_data="close_play_msg"),
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -190,10 +212,9 @@ def _soundcloud_search_and_download(query: str, video: bool):
         opts = _base_opts()
         opts["outtmpl"] = "downloads/sc_%(id)s.%(ext)s"
         opts["format"] = "best"
-        # NO postprocessors — just download raw file
 
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(f"scsearch3:{query}", download=False)
+            info = ydl.extract_info(f"scsearch5:{query}", download=False)
 
             entries = []
             if info and info.get("_type") == "playlist" and info.get("entries"):
@@ -256,9 +277,10 @@ def _youtube_search(query: str):
         opts["extract_flat"] = True
         if _COOKIE_FILE:
             opts["cookiefile"] = _COOKIE_FILE
+            opts["extractor_args"] = {"youtube": {"player_client": ["web_creator"]}}
 
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(f"ytsearch1:{query}", download=False)
+            info = ydl.extract_info(f"ytsearch3:{query}", download=False)
 
             entries = []
             if info and info.get("_type") == "playlist" and info.get("entries"):
@@ -267,14 +289,14 @@ def _youtube_search(query: str):
             if not entries:
                 return None
 
-            v = entries[0]
-            vid = v.get("id") or v.get("url", "")
+            best = _pick_best_match(entries, query) or entries[0]
+            vid = best.get("id") or best.get("url", "")
             return {
-                "title": v.get("title", "Unknown"),
-                "duration": int(v.get("duration", 0) or 0),
+                "title": best.get("title", "Unknown"),
+                "duration": int(best.get("duration", 0) or 0),
                 "link": f"https://www.youtube.com/watch?v={vid}",
                 "thumb": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
-                "channel": v.get("channel", "") or v.get("uploader", "YouTube"),
+                "channel": best.get("channel", "") or best.get("uploader", "YouTube"),
                 "id": vid,
                 "source": "YouTube",
             }
@@ -284,19 +306,33 @@ def _youtube_search(query: str):
 
 
 def _youtube_download(url: str, video: bool) -> str:
-    """Download from YouTube. Try cookies first, then different clients."""
+    """Download from YouTube. Try multiple client strategies."""
     cleanup_downloads()
     suffix = "_v" if video else ""
     outtmpl = f"downloads/yt_%(id)s{suffix}.%(ext)s"
-    fmt = "best[height<=480]/best" if video else "bestaudio/best"
 
-    # Build strategy list
+    # Better format selection
+    if video:
+        fmt = "best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best"
+    else:
+        fmt = (
+            "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio[ext=webm]/"
+            "bestaudio[ext=opus]/bestaudio/best[height<=360]/"
+            "worst[ext=mp4]/worst/best"
+        )
+
+    # Build strategy list — more client combos for resilience
     strategies = []
     if _COOKIE_FILE:
-        strategies.append((_COOKIE_FILE, None, "cookies"))
+        strategies.append((_COOKIE_FILE, ["web_creator"], "cookies+web_creator"))
+        strategies.append((_COOKIE_FILE, ["ios"], "cookies+ios"))
         strategies.append((_COOKIE_FILE, ["web"], "cookies+web"))
+        strategies.append((_COOKIE_FILE, ["mweb"], "cookies+mweb"))
+    strategies.append((None, ["web_creator"], "web_creator"))
+    strategies.append((None, ["ios"], "ios"))
     strategies.append((None, ["mweb"], "mweb"))
-    strategies.append((None, ["android"], "android"))
+    strategies.append((None, ["android_vr"], "android_vr"))
+    strategies.append((None, ["tv"], "tv"))
     strategies.append((None, None, "default"))
 
     for cookie, player_client, desc in strategies:
@@ -307,6 +343,8 @@ def _youtube_download(url: str, video: bool) -> str:
             opts["cookiefile"] = cookie
         if player_client:
             opts["extractor_args"] = {"youtube": {"player_client": player_client}}
+        # Don't post-process, just download the raw format
+        opts["postprocessors"] = []
 
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -322,60 +360,168 @@ def _youtube_download(url: str, video: bool) -> str:
                 if os.path.exists(fname) and os.path.getsize(fname) > 5000:
                     return fname
         except Exception as e:
-            LOGGER.warning(f"YT [{desc}]: {str(e)[:80]}")
-        time.sleep(0.5)
+            LOGGER.warning(f"YT [{desc}]: {str(e)[:120]}")
+        time.sleep(0.3)
 
     return None
 
 
 # =====================================================
-# SOURCE 3: BANDCAMP (via yt-dlp)
+# SOURCE 3: PIPED / INVIDIOUS API (YouTube alternative)
 # =====================================================
 
-def _bandcamp_search_and_download(query: str, video: bool):
-    """Search Bandcamp via yt-dlp."""
-    LOGGER.info(f"Bandcamp search: {query}")
+_PIPED_INSTANCES = [
+    "https://pipedapi.kavin.rocks",
+    "https://pipedapi.r4fo.com",
+    "https://api.piped.projectsegfault.com",
+    "https://pipedapi.moomoo.me",
+    "https://pipedapi.syncpundit.io",
+]
+
+def _piped_search_and_download(query: str, video: bool):
+    """Search and download via Piped API (YouTube frontend)."""
+    LOGGER.info(f"Piped search: {query}")
     cleanup_downloads()
+
+    for api_base in _PIPED_INSTANCES:
+        try:
+            with httpx.Client(timeout=15, follow_redirects=True) as client:
+                # Search
+                resp = client.get(
+                    f"{api_base}/search",
+                    params={"q": query, "filter": "music_songs"},
+                )
+                if resp.status_code != 200:
+                    resp = client.get(
+                        f"{api_base}/search",
+                        params={"q": query, "filter": "videos"},
+                    )
+                if resp.status_code != 200:
+                    continue
+
+                data = resp.json()
+                items = data.get("items", data) if isinstance(data, dict) else data
+                if not items or not isinstance(items, list):
+                    continue
+
+                # Find best video result
+                best = None
+                for item in items[:10]:
+                    if item.get("type", "stream") in ("stream", "video"):
+                        best = item
+                        break
+                if not best:
+                    continue
+
+                # Get stream URL
+                vid_url = best.get("url", "")
+                if not vid_url:
+                    continue
+                vid_id = vid_url.split("?v=")[-1] if "?v=" in vid_url else vid_url.strip("/").split("/")[-1]
+
+                stream_resp = client.get(f"{api_base}/streams/{vid_id}")
+                if stream_resp.status_code != 200:
+                    continue
+
+                stream_data = stream_resp.json()
+
+                # Get audio stream URL
+                audio_streams = stream_data.get("audioStreams", [])
+                if not audio_streams:
+                    LOGGER.warning(f"Piped [{api_base}]: no audio streams")
+                    continue
+
+                # Sort by quality (bitrate)
+                audio_streams.sort(key=lambda x: x.get("bitrate", 0), reverse=True)
+                stream_url = audio_streams[0].get("url", "")
+                if not stream_url:
+                    continue
+
+                # Download the audio
+                title = stream_data.get("title", best.get("title", "Unknown"))
+                duration = stream_data.get("duration", best.get("duration", 0))
+
+                dl_resp = client.get(stream_url, follow_redirects=True)
+                if dl_resp.status_code != 200 or len(dl_resp.content) < 5000:
+                    continue
+
+                # Determine extension
+                content_type = dl_resp.headers.get("content-type", "")
+                if "mp4" in content_type or "m4a" in content_type:
+                    ext = ".m4a"
+                elif "webm" in content_type:
+                    ext = ".webm"
+                elif "opus" in content_type:
+                    ext = ".opus"
+                elif "mpeg" in content_type:
+                    ext = ".mp3"
+                else:
+                    ext = ".m4a"
+
+                local_path = f"downloads/piped_{vid_id}{ext}"
+                with open(local_path, "wb") as f:
+                    f.write(dl_resp.content)
+
+                if os.path.exists(local_path) and os.path.getsize(local_path) > 5000:
+                    LOGGER.info(f"Piped OK [{api_base}]: {title}")
+                    return local_path, {
+                        "title": title,
+                        "duration": int(duration) if duration else 0,
+                        "channel": stream_data.get("uploader", best.get("uploaderName", "YouTube")),
+                        "thumb": stream_data.get("thumbnailUrl", best.get("thumbnail", "")),
+                        "link": f"https://www.youtube.com/watch?v={vid_id}",
+                        "source": "YouTube (Piped)",
+                    }
+
+        except Exception as e:
+            LOGGER.warning(f"Piped [{api_base}]: {str(e)[:80]}")
+            continue
+
+    return None, None
+
+
+# =====================================================
+# SOURCE 4: DIRECT YT-DLP for any URL (generic)
+# =====================================================
+
+def _generic_ytdlp_download(url: str, video: bool):
+    """Download from any yt-dlp supported URL (Spotify, Apple Music, etc)."""
+    LOGGER.info(f"Generic yt-dlp download: {url}")
+    cleanup_downloads()
+
+    if video:
+        fmt = "best[height<=480]/best"
+    else:
+        fmt = "bestaudio[ext=m4a]/bestaudio/best"
+
+    opts = _base_opts()
+    opts["format"] = fmt
+    opts["outtmpl"] = "downloads/gen_%(id)s.%(ext)s"
+    if _COOKIE_FILE:
+        opts["cookiefile"] = _COOKIE_FILE
+
     try:
-        opts = _base_opts()
-        opts["outtmpl"] = "downloads/bc_%(id)s.%(ext)s"
-        opts["format"] = "best"
-
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(f"bcsearch:{query}", download=True)
-
+            info = ydl.extract_info(url, download=True)
             if not info:
                 return None, None
 
-            # Handle playlist result
-            if info.get("_type") == "playlist" and info.get("entries"):
-                entries = list(info["entries"])
-                if not entries:
-                    return None, None
-                info = entries[0]
-                if not info:
-                    return None, None
-                # Re-download the specific track
-                url = info.get("webpage_url") or info.get("url")
-                if url:
-                    info = ydl.extract_info(url, download=True)
-
             track_id = info.get("id", "unknown")
-            local_path = _find_downloaded_file("bc_", track_id, ydl, info)
+            local_path = _find_downloaded_file("gen_", track_id, ydl, info)
 
             if local_path and os.path.getsize(local_path) > 5000:
-                LOGGER.info(f"Bandcamp OK: {info.get('title')} -> {local_path}")
+                title = info.get("title", "Unknown")
+                LOGGER.info(f"Generic OK: {title}")
                 return local_path, {
-                    "title": info.get("title", "Unknown"),
+                    "title": title,
                     "duration": int(info.get("duration", 0) or 0),
-                    "channel": info.get("uploader", info.get("artist", "Bandcamp")),
+                    "channel": info.get("uploader", info.get("artist", "Unknown")),
                     "thumb": info.get("thumbnail", ""),
-                    "link": info.get("webpage_url", ""),
-                    "source": "Bandcamp",
+                    "link": info.get("webpage_url", url),
+                    "source": info.get("extractor", "Direct"),
                 }
-
     except Exception as e:
-        LOGGER.warning(f"Bandcamp error: {str(e)[:60]}")
+        LOGGER.warning(f"Generic yt-dlp error: {str(e)[:100]}")
 
     return None, None
 
@@ -386,6 +532,7 @@ def _bandcamp_search_and_download(query: str, video: bool):
 
 def _extract_song_from_url(url: str) -> str:
     """Extract song name from streaming service URL."""
+    # Try yt-dlp first
     try:
         opts = _base_opts()
         opts["extract_flat"] = True
@@ -398,6 +545,7 @@ def _extract_song_from_url(url: str) -> str:
     except Exception as e:
         LOGGER.warning(f"URL extract (yt-dlp): {str(e)[:60]}")
 
+    # Fallback: scrape the page title
     try:
         with httpx.Client(timeout=10, follow_redirects=True) as client:
             resp = client.get(url)
@@ -411,7 +559,10 @@ def _extract_song_from_url(url: str) -> str:
                                 " | JioSaavn", " | Gaana", " - Amazon Music",
                                 " - Resso", " | Amazon Music", " | Resso",
                                 " - YouTube Music", " | YouTube Music",
-                                " - Wynk Music", " | Wynk"]:
+                                " - Wynk Music", " | Wynk", " - YouTube",
+                                " | YouTube", " - Deezer", " | Deezer",
+                                " - Tidal", " | Tidal", " - Listen on",
+                                " | Listen on"]:
                         raw = raw.replace(suf, "")
                     return raw.strip()
     except Exception:
@@ -441,16 +592,15 @@ def _is_streaming_url(url: str) -> str:
 
 
 # =====================================================
-# MASTER SEARCH: yt-dlp only — no external APIs
+# MASTER SEARCH: multi-source with robust fallback
 # =====================================================
 
 def search_and_get_media(query: str, video: bool):
     """
-    Multi-source via yt-dlp only (no external API dependencies):
-      1. SoundCloud (most reliable, never IP-blocked)
-      2. YouTube (cookies + mweb/android clients)
-      3. Bandcamp (indie/alternative music)
-    All sources use yt-dlp — works on any platform (Heroku/VPS/local).
+    Multi-source search (no external API keys needed):
+      1. SoundCloud (most reliable, no IP blocks)
+      2. YouTube (cookies + multiple client strategies)
+      3. Piped API (YouTube frontend, no cookies needed)
     """
     errors = []
 
@@ -478,15 +628,33 @@ def search_and_get_media(query: str, video: bool):
     except Exception as e:
         errors.append(f"YT: {str(e)[:50]}")
 
-    # === Source 3: Bandcamp ===
-    LOGGER.info("=== Source 3: Bandcamp ===")
+    # === Source 3: Piped API ===
+    LOGGER.info("=== Source 3: Piped API ===")
     try:
-        path, info = _bandcamp_search_and_download(query, video)
+        path, info = _piped_search_and_download(query, video)
         if path and info:
             return path, info
-        errors.append("Bandcamp: no results")
+        errors.append("Piped: no results")
     except Exception as e:
-        errors.append(f"BC: {str(e)[:50]}")
+        errors.append(f"Piped: {str(e)[:50]}")
+
+    # === Source 4: Try different query variations ===
+    LOGGER.info("=== Source 4: Query variations ===")
+    variations = []
+    q_lower = query.lower()
+    if "official" not in q_lower:
+        variations.append(f"{query} official audio")
+    if "lyrics" not in q_lower:
+        variations.append(f"{query} lyrics")
+    variations.append(f"{query} audio")
+
+    for alt_query in variations[:2]:
+        try:
+            path, info = _soundcloud_search_and_download(alt_query, video)
+            if path and info:
+                return path, info
+        except Exception:
+            pass
 
     raise Exception(f"All sources failed: {'; '.join(errors)}")
 
@@ -619,16 +787,28 @@ async def try_play_stream(chat_id, media_path, video, max_retries=4):
 # NOW-PLAYING message
 # =====================================================
 
+_NP_THEMES = [
+    {"bar": "🟣", "icon": "🎵", "vid": "🎬"},
+    {"bar": "🔵", "icon": "🎶", "vid": "📹"},
+    {"bar": "🟢", "icon": "🎧", "vid": "🎥"},
+    {"bar": "🟡", "icon": "🎼", "vid": "📽️"},
+    {"bar": "🔴", "icon": "🎙️", "vid": "🎞️"},
+    {"bar": "🟠", "icon": "💿", "vid": "📺"},
+]
+
 def _build_now_playing(info: dict, video: bool, requester: str,
                        queue_len: int = 0) -> str:
-    source_name = info.get("source", "?")
-    icon = "🎬" if video else "🎵"
+    t = random.choice(_NP_THEMES)
+    icon = t["vid"] if video else t["icon"]
     mode = "ভিডিও" if video else "অডিও"
+    source_name = info.get("source", "?")
+    bar = t["bar"]
+
     caption = (
-        f"╭─────────────────────╮\n"
+        f"╭{'─' * 23}╮\n"
         f"  {icon} <b>এখন {mode} বাজছে</b>\n"
-        f"╰─────────────────────╯\n\n"
-        f"🎵 <b>শিরোনাম:</b> {info.get('title', '?')}\n"
+        f"╰{'─' * 23}╯\n\n"
+        f"{bar} <b>শিরোনাম:</b> {info.get('title', '?')}\n"
         f"⏱ <b>সময়:</b> <code>{fmt_dur(info.get('duration'))}</code>\n"
         f"🎤 <b>শিল্পী:</b> {info.get('channel', '?')}\n"
         f"📡 <b>সোর্স:</b> {source_name}\n"
@@ -701,8 +881,45 @@ async def play_next_in_queue(chat_id: int):
 
     try:
         loop = asyncio.get_event_loop()
+
+        # Handle URLs in queued items
+        search_query = next_query
+        if next_query.startswith("http"):
+            streaming_service = _is_streaming_url(next_query)
+            if streaming_service or re.match(
+                r'https?://(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)/', next_query
+            ):
+                if streaming_service:
+                    extracted = await loop.run_in_executor(
+                        None, _extract_song_from_url, next_query
+                    )
+                    if extracted:
+                        search_query = extracted
+
+                # Try direct download for YouTube URLs
+                if re.match(r'https?://(www\.)?(youtube\.com|youtu\.be)/', next_query):
+                    yt_path = await loop.run_in_executor(
+                        None, _youtube_download, next_query, next_video
+                    )
+                    if yt_path:
+                        yt_info = {
+                            "title": "YouTube", "duration": 0, "channel": "YouTube",
+                            "thumb": "", "link": next_query, "source": "YouTube",
+                        }
+                        result = await try_play_stream(chat_id, str(yt_path), next_video)
+                        if result is True:
+                            ACTIVE_CHATS[chat_id] = yt_info
+                            if status:
+                                try:
+                                    await status.delete()
+                                except Exception:
+                                    pass
+                            queue_len = len(QUEUES.get(chat_id, []))
+                            await send_now_playing(chat_id, yt_info, next_video, requester, queue_len)
+                            return
+
         media_path, info = await loop.run_in_executor(
-            None, search_and_get_media, next_query, next_video
+            None, search_and_get_media, search_query, next_video
         )
 
         if not media_path:
@@ -808,7 +1025,7 @@ async def _play(client, message: Message, video: bool):
         return await message.reply_text(
             f"<b>গানের নাম দাও!</b>\n\n"
             f"উদাহরণ: <code>/{cmd} tum hi ho</code>\n"
-            f"Spotify/Apple Music/JioSaavn লিংকও চলবে!\n"
+            f"Spotify/Apple Music/JioSaavn/YouTube লিংকও চলবে!\n"
             f"কিউ দেখতে: <code>/queue</code>"
         )
 
@@ -834,11 +1051,9 @@ async def _play(client, message: Message, video: bool):
         else:
             streaming_service = _is_streaming_url(query)
             if not streaming_service:
-                return await message.reply_text(
-                    "<b>এই URL সাপোর্টেড নয়!</b>\n\n"
-                    "সাপোর্টেড: YouTube, Spotify, Apple Music, JioSaavn, "
-                    "Gaana, SoundCloud, Deezer, Tidal, Amazon Music, Resso"
-                )
+                # Try generic yt-dlp download for unknown URLs
+                LOGGER.info(f"Unknown URL, trying generic download: {query}")
+                streaming_service = "Direct"
 
         try:
             from MusicBangla.plugins.security import is_url_blocked
@@ -893,6 +1108,33 @@ async def _play(client, message: Message, video: bool):
             await status.edit(
                 f"<b>{streaming_service} লিংক থেকে গান খুঁজছি...</b>"
             )
+
+            # Try direct yt-dlp download first (works for SoundCloud, Deezer etc)
+            if streaming_service not in ("Spotify", "Apple Music"):
+                try:
+                    direct_path, direct_info = await loop.run_in_executor(
+                        None, _generic_ytdlp_download, query, video
+                    )
+                    if direct_path and direct_info:
+                        await status.edit("🎶 <b>Voice Chat-এ যোগ হচ্ছে...</b>")
+                        await asyncio.sleep(1)
+                        result = await try_play_stream(chat_id, str(direct_path), video)
+                        if result is True:
+                            ACTIVE_CHATS[chat_id] = direct_info
+                            try:
+                                await status.delete()
+                            except Exception:
+                                pass
+                            await send_now_playing(chat_id, direct_info, video, requester)
+                            try:
+                                await message.reply_sticker(config.random_play_sticker())
+                            except Exception:
+                                pass
+                            return
+                except Exception:
+                    pass
+
+            # Extract song name and search
             extracted = await loop.run_in_executor(
                 None, _extract_song_from_url, query
             )
@@ -937,12 +1179,14 @@ async def _play(client, message: Message, video: bool):
                         pass
                     return
 
-            # Direct YT download failed -> extract title and use multi-search
-            yt_info = await loop.run_in_executor(
+            # YT direct failed -> try Piped API for this video
+            await status.edit("<b>YouTube বিকল্প উৎস থেকে চেষ্টা করছি...</b>")
+            yt_info_search = await loop.run_in_executor(
                 None, _youtube_search, query
             )
-            if yt_info:
-                search_query = yt_info.get("title", query)
+            if yt_info_search:
+                search_query = yt_info_search.get("title", query)
+            # Fall through to multi-source search
 
         # Multi-source search and download
         await status.edit(
