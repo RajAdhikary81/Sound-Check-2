@@ -32,7 +32,7 @@
     <img src="https://img.shields.io/badge/Deploy%20to-Heroku-430098?style=for-the-badge&logo=heroku&logoColor=white" alt="Deploy to Heroku" width="220" />
   </a>
   &nbsp;&nbsp;
-  <a href="https://railway.app/template/MusicBangla?referralCode=master">
+  <a href="https://railway.com/new/github?repo=RajSukh81/MusicBangla">
     <img src="https://img.shields.io/badge/Deploy%20to-Railway-0B0D0E?style=for-the-badge&logo=railway&logoColor=white" alt="Deploy to Railway" width="220" />
   </a>
 </p>
@@ -42,7 +42,7 @@
     <img src="https://img.shields.io/badge/Deploy%20to-Render-46E3B7?style=for-the-badge&logo=render&logoColor=white" alt="Deploy to Render" width="220" />
   </a>
   &nbsp;&nbsp;
-  <a href="https://app.koyeb.com/deploy?type=git&repository=github.com/RajSukh81/MusicBangla&branch=main&builder=dockerfile">
+  <a href="https://app.koyeb.com/deploy?type=git&repository=github.com/RajSukh81/MusicBangla&branch=main&builder=dockerfile&instance_type=free&regions=was&name=musicbangla">
     <img src="https://img.shields.io/badge/Deploy%20to-Koyeb-121212?style=for-the-badge&logo=koyeb&logoColor=white" alt="Deploy to Koyeb" width="220" />
   </a>
 </p>
@@ -56,6 +56,8 @@
     <img src="https://img.shields.io/badge/Deploy%20with-Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Deploy with Docker" width="220" />
   </a>
 </p>
+
+> ⚠️ **ফ্রি ডিপ্লয় চাইলে:** Railway ($5 trial credit শেষ হলে পেইড), Render (Free Background Worker 750 hrs/মাস), Koyeb (256MB RAM — কম), **Oracle Cloud VPS (সেরা — Forever Free, 24GB RAM)**
 
 ---
 
@@ -258,66 +260,152 @@ Deploy করার আগে এই তথ্যগুলো জোগাড়
 ## 🚀 Deployment Guide / ডিপ্লয়মেন্ট গাইড
 
 <details>
-<summary><h3>🟣 Heroku Deploy</h3></summary>
+<summary><h3>🟣 Heroku Deploy (পেইড — $5/মাস Eco Dynos)</h3></summary>
 
 [![Deploy to Heroku](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/RajSukh81/MusicBangla)
 
-1. উপরের বাটনে ক্লিক করুন
-2. সব environment variables পূরণ করুন
+1. উপরের বাটনে ক্লিক করুন (Heroku অ্যাকাউন্ট + credit card লাগবে)
+2. App name দিন, সব environment variables পূরণ করুন
 3. **Deploy App** ক্লিক করুন
-4. Resources tab-এ **worker** dyno ON করুন, **web** dyno OFF করুন
+4. ⚠️ **গুরুত্বপূর্ণ:** Resources tab-এ **worker** dyno **ON** করুন, **web** dyno **OFF** করুন — না করলে বট চলবে না
 
-> **Buildpacks** (অটো সেট হবে):
+> **Buildpacks** (অটো সেট হবে `app.json` থেকে):
 > - `heroku/nodejs`
 > - `heroku/python`
 > - `heroku-buildpack-ffmpeg-latest`
 
+**Heroku ট্রাবলশুটিং:**
+| সমস্যা | সমাধান |
+|---------|--------|
+| Build fail | Heroku dashboard → Settings → Buildpacks চেক করুন, উপরের ৩টি আছে কিনা দেখুন |
+| Bot starts then stops | Resources tab-এ worker ON আছে কিনা দেখুন |
+| "Application error" | এটি স্বাভাবিক — বট web server নয়, worker dyno চালাতে হবে |
+
 </details>
 
 <details>
-<summary><h3>🚂 Railway Deploy</h3></summary>
+<summary><h3>🚂 Railway Deploy ($5 Trial Credit / তারপর $5/মাস)</h3></summary>
 
-<a href="https://railway.app/template/MusicBangla?referralCode=master">
+<a href="https://railway.com/new/github?repo=RajSukh81/MusicBangla">
   <img src="https://img.shields.io/badge/Deploy%20to-Railway-0B0D0E?style=for-the-badge&logo=railway&logoColor=white" />
 </a>
 
-1. উপরের বাটনে ক্লিক করুন অথবা [railway.app](https://railway.app) এ যান
-2. **New Project** > **Deploy from GitHub Repo** > **MusicBangla** সিলেক্ট
-3. **Variables** tab-এ সব env vars বসান
-4. Railway অটো `Dockerfile` দেখে build করবে
-5. Deploy হয়ে গেলে লগ চেক করুন
+**ম্যানুয়াল পদ্ধতি (এটি সবচেয়ে নির্ভরযোগ্য):**
+
+1. [railway.com](https://railway.com) → **GitHub দিয়ে Sign Up** করুন
+2. Dashboard → **New Project** → **Deploy from GitHub Repo**
+3. প্রথমবার হলে **Configure GitHub App** ক্লিক করে আপনার GitHub অ্যাকাউন্টে Railway ইনস্টল করুন
+4. আপনার ফর্ক করা **MusicBangla** রেপো সিলেক্ট করুন (ফর্ক না থাকলে আগে GitHub-এ ফর্ক করুন)
+5. Railway অটো Dockerfile দেখে build শুরু করবে
+6. ⚠️ **Build শেষ হওয়ার আগেই Variables সেট করুন:**
+   - সার্ভিসে ক্লিক → **Variables** ট্যাব → **New Variable** করে একটি একটি করে যোগ করুন:
+   ```
+   API_ID=আপনার_মান
+   API_HASH=আপনার_মান
+   BOT_TOKEN=আপনার_মান
+   STRING_SESSION=আপনার_মান
+   MONGO_DB_URI=আপনার_মান
+   OWNER_ID=আপনার_মান
+   LOG_GROUP_ID=আপনার_মান
+   ```
+7. Variables সেট করলে Railway **অটো রিডিপ্লয়** করবে
+8. **Deployments** ট্যাবে সবুজ টিক আসলে বট চালু
+
+**`railway.toml` কনফিগ (রেপোতে থাকতে হবে):**
+
+```toml
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python3 -m MusicBangla"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+```
+
+> এই ফাইলটি Railway-কে বলে Dockerfile দিয়ে build করতে এবং `python3 -m MusicBangla` দিয়ে বট স্টার্ট করতে। `healthcheckPath` খালি রাখা হয়েছে কারণ এটি web server নয়।
+
+**Railway ট্রাবলশুটিং:**
+| সমস্যা | সমাধান |
+|---------|--------|
+| "Deploy from GitHub" তে রেপো দেখাচ্ছে না | Railway GitHub App আপনার অ্যাকাউন্টে ইনস্টল করুন — Settings → Applications → Railway → Configure → আপনার রেপো Allow করুন |
+| Build fail — "no such file" | `Dockerfile` ও `railway.toml` দুটোই রেপোর root-এ আছে কিনা চেক করুন |
+| "Application failed to respond" | এটি ignore করুন — বট web server নয়, worker হিসেবে চলবে, এই warning স্বাভাবিক। `railway.toml`-এ `healthcheckPath` খালি আছে তাই Railway health check করবে না |
+| বট চালু হয়ে বন্ধ হয়ে যায় | Variables ট্যাবে সব env vars ঠিক আছে কিনা দেখুন, বিশেষত `STRING_SESSION` |
+| $5 credit শেষ | Hobby Plan ($5/মাস) লাগবে, অথবা Oracle Cloud VPS-এ মাইগ্রেট করুন |
+| পুরোনো template URL কাজ করছে না | Railway এখন `railway.com` ডোমেইন ব্যবহার করে, `railway.app` থেকে রিডাইরেক্ট হওয়া উচিত, তবে ম্যানুয়াল deploy সবচেয়ে নির্ভরযোগ্য |
+
+> 💡 **টিপ:** Railway-তে ২৪/৭ চালালে ~$3-4/মাস credit ব্যবহার হয়। $5 ফ্রি ক্রেডিট ~১ মাস চলবে।
 
 </details>
 
 <details>
-<summary><h3>🟢 Render Deploy</h3></summary>
+<summary><h3>🟢 Render Deploy (ফ্রি — 750 hrs/মাস Background Worker)</h3></summary>
 
 <a href="https://render.com/deploy?repo=https://github.com/RajSukh81/MusicBangla">
   <img src="https://img.shields.io/badge/Deploy%20to-Render-46E3B7?style=for-the-badge&logo=render&logoColor=white" />
 </a>
 
-1. উপরের বাটনে ক্লিক করুন অথবা [render.com](https://render.com) এ যান
-2. **New** > **Background Worker**
-3. GitHub repo connect করুন
-4. **Environment** = Docker সিলেক্ট
-5. **Environment Variables** এ সব vars বসান
+**ম্যানুয়াল পদ্ধতি:**
+
+1. [render.com](https://render.com) → GitHub দিয়ে Sign Up
+2. Dashboard → **New** → **Background Worker** (⚠️ Web Service নয়!)
+3. **Connect a repository** → আপনার ফর্ক করা MusicBangla সিলেক্ট করুন
+4. সেটিংস:
+   | সেটিং | মান |
+   |--------|------|
+   | **Name** | `musicbangla-bot` |
+   | **Region** | Oregon বা Singapore |
+   | **Branch** | `main` |
+   | **Runtime** | **Docker** |
+   | **Instance Type** | **Free** |
+5. **Environment Variables** সেকশনে সব vars যোগ করুন
 6. **Create Background Worker** ক্লিক করুন
+
+**Render ট্রাবলশুটিং:**
+| সমস্যা | সমাধান |
+|---------|--------|
+| "Web Service" বানিয়ে ফেলেছি | Delete করে **Background Worker** হিসেবে আবার বানান — বট HTTP serve করে না |
+| Build fail | Render Dashboard → Events ট্যাবে build log দেখুন |
+| বট ১৫ মিনিট পর বন্ধ | আপনি Web Service বানিয়েছেন, Background Worker বানান |
+| Docker build এরর | Dockerfile-এ `python:3.12-slim` image ব্যবহার হচ্ছে, Render-এ সমস্যা হলে `python:3.11-slim` ট্রাই করুন |
+
+> 💡 **টিপ:** Render Free tier-এ Background Worker মাসে 750 ঘন্টা চলে — ২৪/৭ এর জন্য যথেষ্ট।
 
 </details>
 
 <details>
-<summary><h3>🔵 Koyeb Deploy</h3></summary>
+<summary><h3>🔵 Koyeb Deploy (ফ্রি — 256MB RAM, সীমিত)</h3></summary>
 
-<a href="https://app.koyeb.com/deploy?type=git&repository=github.com/RajSukh81/MusicBangla&branch=main&builder=dockerfile">
+<a href="https://app.koyeb.com/deploy?type=git&repository=github.com/RajSukh81/MusicBangla&branch=main&builder=dockerfile&instance_type=free&regions=was&name=musicbangla">
   <img src="https://img.shields.io/badge/Deploy%20to-Koyeb-121212?style=for-the-badge&logo=koyeb&logoColor=white" />
 </a>
 
-1. উপরের বাটনে ক্লিক করুন অথবা [koyeb.com](https://koyeb.com) এ যান
-2. GitHub repo connect করুন
-3. **Builder** = Dockerfile সিলেক্ট
-4. **Instance type** = Worker (web নয়)
-5. Environment variables বসান
-6. Deploy করুন
+**ম্যানুয়াল পদ্ধতি:**
+
+1. [koyeb.com](https://koyeb.com) → GitHub দিয়ে Sign Up
+2. **Create App** → **GitHub** সিলেক্ট
+3. আপনার ফর্ক করা **MusicBangla** রেপো সিলেক্ট, Branch: `main`
+4. সেটিংস:
+   | সেটিং | মান |
+   |--------|------|
+   | **Builder** | Dockerfile |
+   | **Instance type** | Free — Nano |
+   | **Region** | Washington, D.C. (ফ্রি-তে শুধু এটি) |
+5. ⚠️ **Health checks** সেকশনে HTTP/TCP health check **বন্ধ করুন** — বট web server নয়, health check on থাকলে Koyeb বারবার restart দেবে
+6. **Environment Variables** সেকশনে সব vars যোগ করুন
+7. **Deploy** ক্লিক করুন
+
+**Koyeb ট্রাবলশুটিং:**
+| সমস্যা | সমাধান |
+|---------|--------|
+| বট বারবার restart হচ্ছে | Health check বন্ধ করুন — Settings → Health checks → Disable |
+| "Unhealthy" দেখাচ্ছে | উপরের মতো health check off করুন |
+| Out of memory / crash | Koyeb Free-তে মাত্র 256MB RAM — মিউজিক বটের জন্য কম হতে পারে, Oracle Cloud VPS বেটার |
+| Build timeout | Koyeb-এ বড় Docker image build হতে সময় লাগে, ধৈর্য রাখুন |
+
+> ⚠️ **সতর্কতা:** Koyeb Free tier-এ মাত্র 256MB RAM ও 0.1 vCPU — FFmpeg ও PyTgCalls মেমোরি-ভারী হওয়ায় ভয়েস চ্যাটে সমস্যা হতে পারে। দীর্ঘমেয়াদে **Oracle Cloud VPS** (Forever Free, 24GB RAM) সুপারিশ করা হচ্ছে।
 
 </details>
 
@@ -362,12 +450,35 @@ docker-compose restart
 <details>
 <summary><h3>🖥️ VPS Deploy / ভিপিএস ডিপ্লয় (Oracle / Hetzner / Contabo / DigitalOcean)</h3></summary>
 
+**🏆 Oracle Cloud — Forever Free (সেরা অপশন):**
+
+Oracle Cloud Always Free tier-এ ARM VM পাবেন — চিরকাল ফ্রি, কোনো চার্জ নেই:
+
+1. [cloud.oracle.com](https://cloud.oracle.com) → Sign Up (ক্রেডিট কার্ড লাগবে ভেরিফিকেশনের জন্য, চার্জ হবে না)
+2. **Compute** → **Instances** → **Create Instance**:
+   | সেটিং | মান |
+   |--------|------|
+   | Image | **Ubuntu 22.04** |
+   | Shape | **VM.Standard.A1.Flex** (ARM — Always Free) |
+   | OCPUs | 1 |
+   | Memory | 6 GB |
+3. SSH key ডাউনলোড করুন → **Create** ক্লিক
+4. Instance Running হলে Public IP কপি করুন
+
+**SSH দিয়ে VPS-এ সংযুক্ত হোন:**
+
+```bash
+# Linux/Mac
+chmod 400 ~/Downloads/your-key.key
+ssh -i ~/Downloads/your-key.key ubuntu@YOUR_PUBLIC_IP
+
+# Windows (PowerShell)
+ssh -i C:\path\to\your-key.key ubuntu@YOUR_PUBLIC_IP
+```
+
 **One-Command Setup (Ubuntu 20.04/22.04/24.04):**
 
 ```bash
-# SSH দিয়ে VPS-এ ঢুকুন
-ssh ubuntu@your-server-ip
-
 # এক কমান্ডেই সব ইনস্টল হবে
 git clone https://github.com/RajSukh81/MusicBangla.git
 cd MusicBangla
@@ -393,11 +504,16 @@ sudo systemctl stop musicbangla      # বন্ধ করুন
 sudo journalctl -u musicbangla -f    # লাইভ লগ দেখুন
 ```
 
+**বট আপডেট করুন:**
+```bash
+cd ~/MusicBangla && git pull && sudo systemctl restart musicbangla
+```
+
 **Recommended Free/Cheap VPS / সুপারিশকৃত VPS:**
 
 | Provider | Price | RAM | Note |
 |----------|-------|-----|------|
-| [Oracle Cloud](https://www.oracle.com/cloud/free/) | **Forever Free** | 24GB (ARM) | সেরা free option |
+| [Oracle Cloud](https://www.oracle.com/cloud/free/) | **Forever Free** | 24GB (ARM) | 🏆 সেরা free option — ২৪/৭ চলবে |
 | [Hetzner](https://www.hetzner.com/cloud/) | ~$4/mo | 2GB | YouTube block করে না |
 | [Contabo](https://contabo.com/) | ~$5/mo | 4GB | সস্তা, ভালো performance |
 | [DigitalOcean](https://www.digitalocean.com/) | $4/mo | 512MB | Reliable |
@@ -446,7 +562,7 @@ MusicBangla/
 ├── docker-compose.yml     # Docker Compose (VPS)
 ├── Procfile               # Heroku worker process
 ├── app.json               # Heroku one-click deploy
-├── railway.toml           # Railway.app config
+├── railway.toml           # Railway.com config
 ├── render.yaml            # Render.com config
 ├── setup-vps.sh           # Ubuntu VPS auto-setup script
 ├── package.json           # Node.js (py-tgcalls dependency)
