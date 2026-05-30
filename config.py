@@ -22,12 +22,36 @@ START_IMAGES = [
     "https://pic-link-bot.lovable.app/i/telegram-1779340095109-3b9afb55.jpg",
 ]
 
-# --- Colorful reaction emojis (expanded) ---
+# --- Colorful reaction emojis (massively expanded) ---
 REACTION_EMOJIS = [
     "🎵", "🔥", "❤️", "🎶", "✨", "🎧", "💫", "🌟", "🎤", "💝",
     "🥰", "👍", "🎉", "💜", "💙", "💚", "🧡", "💛", "🤩", "😍",
     "🫶", "🙌", "⚡", "🌈", "🎸", "🎹", "🎷", "🎺", "🎻", "💃",
     "🕺", "🤟", "👏", "💖", "🦋", "🌸", "🍀", "🎀", "🏆", "💎",
+    "❤️‍🔥", "🫰", "💯", "🫡", "🤗", "😎", "🥳", "🫠", "😇",
+    "🪩", "🎊", "🌺", "🌻", "🌷", "🌹", "🫧", "💐", "🍭", "🍬",
+    "🧸", "🎈", "🎁", "🎠", "🎡", "🎢", "🎪", "🎭", "🎨",
+]
+
+# --- Big emoji messages for chat reactions ---
+BIG_EMOJI_REACTIONS = [
+    "🎵🎶🎧", "🔥🔥🔥", "❤️‍🔥❤️‍🔥", "✨💫⭐", "🎤🎸🎹",
+    "💜💙💚", "🎉🥳🎊", "😍🥰🤩", "🙌👏🤟", "💃🕺🪩",
+    "🌈🌸🦋", "💎🏆⚡", "🎷🎺🎻", "🫶❤️💝", "💯🔥✨",
+    "🎧🎵🎶", "🌟💫🌈", "🥳🎉🎊", "😎🤟🔥", "🫰💖💗",
+    "🎸⚡🔥", "🪩💃🕺", "🎹🎼🎵", "💐🌹🌸", "🧸🎀🎁",
+    "🎠🎡🎢", "🍭🍬🎈", "🎪🎭🎨", "💝💖💗", "⭐🌟✨",
+]
+
+# --- Song playing big emojis ---
+PLAY_BIG_EMOJIS = [
+    "🎵", "🎶", "🎧", "🎤", "🎸", "🎹", "🎷", "🎺", "🎻", "💿",
+    "📀", "🎼", "🎙️", "🔊", "🔉", "🪗", "🥁", "🪘", "🪕", "🎚️",
+]
+
+# --- Video playing big emojis ---
+VIDEO_BIG_EMOJIS = [
+    "🎬", "📹", "🎥", "📽️", "🎞️", "📺", "🖥️", "📡", "🎦", "🎭",
 ]
 
 # --- Play stickers (music-themed, animated) ---
@@ -62,10 +86,10 @@ STOP_STICKERS = [
 ]
 
 # --- Fun reaction emojis for different events ---
-SEARCH_EMOJIS = ["🔍", "🔎", "🧐", "👀", "🕵️", "🔭", "🎯"]
-DOWNLOAD_EMOJIS = ["📥", "⬇️", "💾", "📦", "🚀", "⚡", "🌊"]
-SUCCESS_EMOJIS = ["✅", "🎉", "🥳", "🎊", "💯", "🏆", "⭐"]
-ERROR_EMOJIS = ["❌", "😔", "🥲", "💔", "🫣", "😵", "🤕"]
+SEARCH_EMOJIS = ["🔍", "🔎", "🧐", "👀", "🕵️", "🔭", "🎯", "🫣", "🤔", "🧭"]
+DOWNLOAD_EMOJIS = ["📥", "⬇️", "💾", "📦", "🚀", "⚡", "🌊", "🏎️", "💨", "🛸"]
+SUCCESS_EMOJIS = ["✅", "🎉", "🥳", "🎊", "💯", "🏆", "⭐", "🌟", "🔥", "💪"]
+ERROR_EMOJIS = ["❌", "😔", "🥲", "💔", "🫣", "😵", "🤕", "😢", "🫠", "😿"]
 
 def random_image():
     return random.choice(START_IMAGES)
@@ -96,3 +120,12 @@ def random_success_emoji():
 
 def random_error_emoji():
     return random.choice(ERROR_EMOJIS)
+
+def random_big_emoji():
+    return random.choice(BIG_EMOJI_REACTIONS)
+
+def random_play_big_emoji():
+    return random.choice(PLAY_BIG_EMOJIS)
+
+def random_video_big_emoji():
+    return random.choice(VIDEO_BIG_EMOJIS)

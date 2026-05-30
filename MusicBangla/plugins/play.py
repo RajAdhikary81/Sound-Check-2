@@ -99,6 +99,9 @@ _BUTTON_THEMES = [
     {"song": "💿", "add": "🔥", "channel": "🎺", "support": "💚", "owner": "🎹", "close": "🛑"},
     {"song": "🎼", "add": "⭐", "channel": "📻", "support": "🧡", "owner": "🎻", "close": "❎"},
     {"song": "🎙️", "add": "💫", "channel": "🎷", "support": "💛", "owner": "🎯", "close": "🔻"},
+    {"song": "🪩", "add": "🫶", "channel": "🎪", "support": "❤️‍🔥", "owner": "🫰", "close": "🚫"},
+    {"song": "📀", "add": "🏆", "channel": "🌸", "support": "🫧", "owner": "💎", "close": "⭕"},
+    {"song": "🥁", "add": "🎊", "channel": "🦋", "support": "🌺", "owner": "🎭", "close": "🔺"},
 ]
 
 def _get_theme():
@@ -251,9 +254,13 @@ def _soundcloud_search_and_download(query: str, video: bool):
 
         # Download in a separate instance
         LOGGER.info(f"SoundCloud: downloading '{best.get('title', '?')}'")
+        suffix = "_v" if video else ""
         dl_opts = _base_opts()
-        dl_opts["outtmpl"] = "downloads/sc_%(id)s.%(ext)s"
-        dl_opts["format"] = "best"
+        dl_opts["outtmpl"] = f"downloads/sc_%(id)s{suffix}.%(ext)s"
+        if video:
+            dl_opts["format"] = "best[ext=mp4]/best[ext=webm]/best"
+        else:
+            dl_opts["format"] = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"
 
         with yt_dlp.YoutubeDL(dl_opts) as ydl2:
             dl_info = ydl2.extract_info(webpage_url, download=True)
@@ -545,7 +552,7 @@ _PIPED_INSTANCES = [
 
 def _piped_search_and_download(query: str, video: bool):
     """Search and download via Piped API (YouTube alternative frontend)."""
-    LOGGER.info(f"Piped search: {query}")
+    LOGGER.info(f"Piped search: {query} (video={video})")
 
     for api_base in _PIPED_INSTANCES:
         try:
@@ -593,36 +600,65 @@ def _piped_search_and_download(query: str, video: bool):
                     continue
 
                 stream_data = stream_resp.json()
-                audio_streams = stream_data.get("audioStreams", [])
-
-                if not audio_streams:
-                    continue
-
-                # Sort by bitrate (highest first)
-                audio_streams.sort(key=lambda x: int(x.get("bitrate", 0) or 0), reverse=True)
-
-                stream_url = audio_streams[0].get("url", "")
-                if not stream_url:
-                    continue
 
                 title = stream_data.get("title", best.get("title", "Unknown"))
                 duration = stream_data.get("duration", best.get("duration", 0))
                 uploader = stream_data.get("uploader", best.get("uploaderName", "YouTube"))
 
-                # Download the audio stream
+                if video:
+                    # For video mode, pick video+audio stream
+                    video_streams = stream_data.get("videoStreams", [])
+                    if not video_streams:
+                        continue
+                    # Filter for streams with both video+audio or pick best video
+                    video_streams.sort(
+                        key=lambda x: int(x.get("height", 0) or 0),
+                        reverse=True,
+                    )
+                    # Prefer 480p or lower for bandwidth
+                    chosen = None
+                    for vs in video_streams:
+                        h = int(vs.get("height", 0) or 0)
+                        if h <= 480 and vs.get("url"):
+                            chosen = vs
+                            break
+                    if not chosen:
+                        chosen = video_streams[-1] if video_streams else None
+                    if not chosen or not chosen.get("url"):
+                        continue
+
+                    stream_url = chosen["url"]
+                    mime = chosen.get("mimeType", chosen.get("type", ""))
+                    if "mp4" in mime:
+                        ext = ".mp4"
+                    elif "webm" in mime:
+                        ext = ".webm"
+                    else:
+                        ext = ".mp4"
+                else:
+                    # Audio mode
+                    audio_streams = stream_data.get("audioStreams", [])
+                    if not audio_streams:
+                        continue
+                    audio_streams.sort(key=lambda x: int(x.get("bitrate", 0) or 0), reverse=True)
+                    stream_url = audio_streams[0].get("url", "")
+                    if not stream_url:
+                        continue
+                    mime = audio_streams[0].get("mimeType", audio_streams[0].get("type", ""))
+                    if "mp4" in mime or "m4a" in mime:
+                        ext = ".m4a"
+                    elif "webm" in mime or "opus" in mime:
+                        ext = ".webm"
+                    else:
+                        ext = ".m4a"
+
+                # Download the stream
                 dl_resp = client.get(stream_url, follow_redirects=True, timeout=60)
                 if dl_resp.status_code != 200 or len(dl_resp.content) < 5000:
                     continue
 
-                mime = audio_streams[0].get("mimeType", audio_streams[0].get("type", ""))
-                if "mp4" in mime or "m4a" in mime:
-                    ext = ".m4a"
-                elif "webm" in mime or "opus" in mime:
-                    ext = ".webm"
-                else:
-                    ext = ".m4a"
-
-                local_path = f"downloads/pip_{vid_id}{ext}"
+                suffix = "_v" if video else ""
+                local_path = f"downloads/pip_{vid_id}{suffix}{ext}"
                 with open(local_path, "wb") as f:
                     f.write(dl_resp.content)
 
@@ -661,7 +697,7 @@ _INVIDIOUS_INSTANCES = [
 
 def _invidious_search_and_download(query: str, video: bool):
     """Search and download via Invidious API (YouTube frontend)."""
-    LOGGER.info(f"Invidious search: {query}")
+    LOGGER.info(f"Invidious search: {query} (video={video})")
 
     for api_base in _INVIDIOUS_INSTANCES:
         try:
@@ -700,34 +736,83 @@ def _invidious_search_and_download(query: str, video: bool):
                 vid_data = vid_resp.json()
                 adaptive = vid_data.get("adaptiveFormats", [])
 
-                audio_streams = [
-                    s for s in adaptive
-                    if s.get("type", "").startswith("audio/")
-                ]
-                if not audio_streams:
-                    continue
-
-                audio_streams.sort(key=lambda x: int(x.get("bitrate", 0) or 0), reverse=True)
-                stream_url = audio_streams[0].get("url", "")
-                if not stream_url:
-                    continue
-
                 title = vid_data.get("title", best.get("title", "Unknown"))
                 duration = vid_data.get("lengthSeconds", best.get("lengthSeconds", 0))
+
+                if video:
+                    # For video mode, pick video stream (prefer mp4 <=480p)
+                    video_streams = [
+                        s for s in adaptive
+                        if s.get("type", "").startswith("video/")
+                    ]
+                    if not video_streams:
+                        # Fallback: try formatStreams (muxed video+audio)
+                        format_streams = vid_data.get("formatStreams", [])
+                        if not format_streams:
+                            continue
+                        # Pick best muxed stream <=480p
+                        chosen = None
+                        for fs in format_streams:
+                            q = fs.get("qualityLabel", "")
+                            if "360" in q or "480" in q:
+                                chosen = fs
+                                break
+                        if not chosen:
+                            chosen = format_streams[0]
+                        stream_url = chosen.get("url", "")
+                        if not stream_url:
+                            continue
+                        ext = ".mp4"
+                    else:
+                        video_streams.sort(
+                            key=lambda x: int(x.get("bitrate", 0) or 0),
+                            reverse=True,
+                        )
+                        chosen = None
+                        for vs in video_streams:
+                            res = vs.get("resolution", "")
+                            # Accept <=480p
+                            try:
+                                h = int(res.replace("p", "")) if res else 9999
+                            except ValueError:
+                                h = 9999
+                            if h <= 480 and vs.get("url"):
+                                chosen = vs
+                                break
+                        if not chosen:
+                            chosen = video_streams[-1]
+                        stream_url = chosen.get("url", "")
+                        if not stream_url:
+                            continue
+                        mime = chosen.get("type", "")
+                        ext = ".mp4" if "mp4" in mime else ".webm"
+                else:
+                    # Audio mode
+                    audio_streams = [
+                        s for s in adaptive
+                        if s.get("type", "").startswith("audio/")
+                    ]
+                    if not audio_streams:
+                        continue
+
+                    audio_streams.sort(key=lambda x: int(x.get("bitrate", 0) or 0), reverse=True)
+                    stream_url = audio_streams[0].get("url", "")
+                    if not stream_url:
+                        continue
+                    mime = audio_streams[0].get("type", "")
+                    if "mp4" in mime or "m4a" in mime:
+                        ext = ".m4a"
+                    elif "webm" in mime or "opus" in mime:
+                        ext = ".webm"
+                    else:
+                        ext = ".m4a"
 
                 dl_resp = client.get(stream_url, follow_redirects=True, timeout=30)
                 if dl_resp.status_code != 200 or len(dl_resp.content) < 5000:
                     continue
 
-                mime = audio_streams[0].get("type", "")
-                if "mp4" in mime or "m4a" in mime:
-                    ext = ".m4a"
-                elif "webm" in mime or "opus" in mime:
-                    ext = ".webm"
-                else:
-                    ext = ".m4a"
-
-                local_path = f"downloads/inv_{vid_id}{ext}"
+                suffix = "_v" if video else ""
+                local_path = f"downloads/inv_{vid_id}{suffix}{ext}"
                 with open(local_path, "wb") as f:
                     f.write(dl_resp.content)
 
@@ -755,16 +840,17 @@ def _invidious_search_and_download(query: str, video: bool):
 
 def _generic_ytdlp_download(url: str, video: bool):
     """Download from any yt-dlp supported URL (SoundCloud direct, Deezer, etc)."""
-    LOGGER.info(f"Generic yt-dlp download: {url}")
+    LOGGER.info(f"Generic yt-dlp download: {url} (video={video})")
 
     if video:
-        fmt = "best[height<=480]/best"
+        fmt = "best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best"
     else:
-        fmt = "bestaudio[ext=m4a]/bestaudio/best"
+        fmt = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"
 
+    suffix = "_v" if video else ""
     opts = _base_opts()
     opts["format"] = fmt
-    opts["outtmpl"] = "downloads/gen_%(id)s.%(ext)s"
+    opts["outtmpl"] = f"downloads/gen_%(id)s{suffix}.%(ext)s"
     if _COOKIE_FILE:
         opts["cookiefile"] = _COOKIE_FILE
 
@@ -866,12 +952,12 @@ def _is_streaming_url(url: str) -> str:
 def search_and_get_media(query: str, video: bool):
     """
     Multi-source search with robust fallback chain:
-      1. JioSaavn (free API — best for Hindi/Bengali/Indian songs)
-      2. YouTube (yt-dlp with cookies + multiple client strategies)
-      3. Piped (YouTube alternative frontend, no cookies)
-      4. Invidious (another YouTube alt frontend)
-      5. Query variations on JioSaavn
-      6. SoundCloud (last resort — often returns wrong songs)
+      1. YouTube (yt-dlp with cookies + multiple client strategies)
+      2. SoundCloud (yt-dlp — great for remixes, indie tracks)
+      3. JioSaavn (free API — best for Hindi/Bengali/Indian songs)
+      4. Piped (YouTube alternative frontend, no cookies)
+      5. Invidious (another YouTube alt frontend)
+      6. Query variations on JioSaavn
     """
     errors = []
 
@@ -879,18 +965,8 @@ def search_and_get_media(query: str, video: bool):
     if random.random() < 0.3:
         cleanup_downloads()
 
-    # === Source 1: JioSaavn ===
-    LOGGER.info("=== Source 1: JioSaavn ===")
-    try:
-        path, info = _jiosaavn_search_and_download(query, video)
-        if path and info:
-            return path, info
-        errors.append("JioSaavn: no results")
-    except Exception as e:
-        errors.append(f"JS: {str(e)[:50]}")
-
-    # === Source 2: YouTube (yt-dlp) ===
-    LOGGER.info("=== Source 2: YouTube ===")
+    # === Source 1: YouTube (yt-dlp) ===
+    LOGGER.info("=== Source 1: YouTube ===")
     try:
         yt_info = _youtube_search(query)
         if yt_info:
@@ -903,8 +979,28 @@ def search_and_get_media(query: str, video: bool):
     except Exception as e:
         errors.append(f"YT: {str(e)[:50]}")
 
-    # === Source 3: Piped (YouTube alt frontend) ===
-    LOGGER.info("=== Source 3: Piped ===")
+    # === Source 2: SoundCloud ===
+    LOGGER.info("=== Source 2: SoundCloud ===")
+    try:
+        path, info = _soundcloud_search_and_download(query, video)
+        if path and info:
+            return path, info
+        errors.append("SoundCloud: no results")
+    except Exception as e:
+        errors.append(f"SC: {str(e)[:50]}")
+
+    # === Source 3: JioSaavn ===
+    LOGGER.info("=== Source 3: JioSaavn ===")
+    try:
+        path, info = _jiosaavn_search_and_download(query, video)
+        if path and info:
+            return path, info
+        errors.append("JioSaavn: no results")
+    except Exception as e:
+        errors.append(f"JS: {str(e)[:50]}")
+
+    # === Source 4: Piped (YouTube alt frontend) ===
+    LOGGER.info("=== Source 4: Piped ===")
     try:
         path, info = _piped_search_and_download(query, video)
         if path and info:
@@ -913,8 +1009,8 @@ def search_and_get_media(query: str, video: bool):
     except Exception as e:
         errors.append(f"Pip: {str(e)[:50]}")
 
-    # === Source 4: Invidious ===
-    LOGGER.info("=== Source 4: Invidious ===")
+    # === Source 5: Invidious ===
+    LOGGER.info("=== Source 5: Invidious ===")
     try:
         path, info = _invidious_search_and_download(query, video)
         if path and info:
@@ -923,8 +1019,8 @@ def search_and_get_media(query: str, video: bool):
     except Exception as e:
         errors.append(f"Inv: {str(e)[:50]}")
 
-    # === Source 5: Query variations on JioSaavn ===
-    LOGGER.info("=== Source 5: Query variations ===")
+    # === Source 6: Query variations on JioSaavn ===
+    LOGGER.info("=== Source 6: Query variations ===")
     variations = []
     q_lower = query.lower()
     if "official" not in q_lower:
@@ -939,16 +1035,6 @@ def search_and_get_media(query: str, video: bool):
                 return path, info
         except Exception:
             pass
-
-    # === Source 6: SoundCloud (last resort — often returns wrong matches) ===
-    LOGGER.info("=== Source 6: SoundCloud (last resort) ===")
-    try:
-        path, info = _soundcloud_search_and_download(query, video)
-        if path and info:
-            return path, info
-        errors.append("SoundCloud: no results")
-    except Exception as e:
-        errors.append(f"SC: {str(e)[:50]}")
 
     raise Exception(f"All sources failed: {'; '.join(errors)}")
 
@@ -1010,11 +1096,20 @@ def fmt_dur(s):
 
 
 async def safe_react(client, message, emoji):
+    """Try to react with given emoji, fallback to safe emojis if it fails."""
+    _safe_emojis = ["🎵", "🔥", "❤️", "👍", "🎉", "⚡", "✨", "💯"]
     try:
         await client.send_reaction(
             chat_id=message.chat.id, message_id=message.id, emoji=emoji)
     except Exception:
-        pass
+        # Fallback: try a known-safe emoji
+        for fallback in _safe_emojis:
+            try:
+                await client.send_reaction(
+                    chat_id=message.chat.id, message_id=message.id, emoji=fallback)
+                break
+            except Exception:
+                continue
 
 
 async def ensure_assistant(chat_id: int):
@@ -1109,6 +1204,10 @@ _NP_THEMES = [
     {"bar": "🟡", "icon": "🎼", "vid": "📽️"},
     {"bar": "🔴", "icon": "🎙️", "vid": "🎞️"},
     {"bar": "🟠", "icon": "💿", "vid": "📺"},
+    {"bar": "🪩", "icon": "🎸", "vid": "🎦"},
+    {"bar": "💎", "icon": "🎹", "vid": "🎭"},
+    {"bar": "🌟", "icon": "🎷", "vid": "🖥️"},
+    {"bar": "⚡", "icon": "🎺", "vid": "📡"},
 ]
 
 def _build_now_playing(info: dict, video: bool, requester: str,
@@ -1137,7 +1236,8 @@ def _build_now_playing(info: dict, video: bool, requester: str,
         f"⏸ <code>/pause</code>  ▶️ <code>/resume</code>\n"
         f"⏭ <code>/skip</code>   🛑 <code>/stop</code>\n"
         f"📋 <code>/queue</code>\n"
-        f"╰─────────────────╯"
+        f"╰─────────────────╯\n\n"
+        f"🌐 YouTube | SoundCloud | JioSaavn | Apple Music | Spotify"
     )
     return caption
 
@@ -1158,6 +1258,13 @@ async def send_now_playing(chat_id, info, video, requester, queue_len=0):
             await app.send_message(chat_id, caption, reply_markup=buttons)
         except Exception:
             await app.send_message(chat_id, caption)
+
+    # Send big emoji reaction message
+    try:
+        big = config.random_big_emoji()
+        await app.send_message(chat_id, big)
+    except Exception:
+        pass
 
 
 # =====================================================
@@ -1340,7 +1447,11 @@ async def _play(client, message: Message, video: bool):
         return await message.reply_text(
             f"<b>গানের নাম দাও!</b>\n\n"
             f"উদাহরণ: <code>/{cmd} tum hi ho</code>\n"
-            f"Spotify/Apple Music/JioSaavn/YouTube লিংকও চলবে!\n"
+            f"🎵 অডিও: <code>/play গান</code>\n"
+            f"🎬 ভিডিও: <code>/vplay গান</code>\n\n"
+            f"🌐 <b>সাপোর্টেড প্ল্যাটফর্ম:</b>\n"
+            f"YouTube | SoundCloud | JioSaavn\n"
+            f"Apple Music | Spotify — সব লিংক চলে!\n\n"
             f"কিউ দেখতে: <code>/queue</code>"
         )
 

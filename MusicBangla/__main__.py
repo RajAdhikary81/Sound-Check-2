@@ -69,13 +69,14 @@ async def main():
             f"🕐 <b>সময়:</b> <code>{asyncio.get_event_loop().time()}</code>\n"
             f"👨‍💻 <b>মালিক:</b> @{config.OWNER_USERNAME}\n\n"
             f"<b>Features:</b>\n"
-            f"✓ Multi-Platform Music (JioSaavn, SoundCloud, YouTube, Piped, Invidious)\n"
+            f"✓ Multi-Platform Music (YouTube, SoundCloud, JioSaavn, Apple Music, Spotify)\n"
             f"✓ Audio & Video Streaming\n"
             f"✓ Auto Queue & Auto-Play Next\n"
-            f"✓ Spotify/Apple Music/JioSaavn Link Support\n"
+            f"✓ Spotify/Apple Music/JioSaavn/YouTube Link Support\n"
             f"✓ Games\n"
             f"✓ Smart Tagging\n"
-            f"✓ Auto-welcome"
+            f"✓ Auto-welcome\n"
+            f"✓ Big Emoji Reactions"
         )
         await app.send_message(chat_id=config.LOG_GROUP_ID, text=startup_text)
         LOGGER.info(f"✅ Startup message পাঠানো হয়েছে Log group-এ ({config.LOG_GROUP_ID})")
