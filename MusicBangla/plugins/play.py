@@ -547,6 +547,31 @@ def _youtube_download(url: str, video: bool) -> str:
 
 
 # =====================================================
+# COMBINED: YouTube search + download in one shot
+# =====================================================
+
+def _youtube_search_and_download(query: str, video: bool):
+    """
+    Search YouTube and download the best match in a single flow.
+    Returns (local_path, info_dict) or (None, None).
+    """
+    LOGGER.info(f"YouTube combined search+download: {query} (video={video})")
+
+    yt_info = _youtube_search(query)
+    if not yt_info:
+        LOGGER.warning("YouTube combined: search returned nothing")
+        return None, None
+
+    path = _youtube_download(yt_info["link"], video)
+    if path:
+        LOGGER.info(f"YouTube combined OK: {yt_info.get('title', '?')} -> {path}")
+        return path, yt_info
+
+    LOGGER.warning("YouTube combined: download failed after successful search")
+    return None, None
+
+
+# =====================================================
 # SOURCE 4: PIPED API (YouTube alternative — replaces Invidious)
 # =====================================================
 
@@ -962,7 +987,7 @@ def _is_streaming_url(url: str) -> str:
 def search_and_get_media(query: str, video: bool):
     """
     Multi-source search with robust fallback chain:
-      1. YouTube (yt-dlp with cookies + multiple client strategies)
+      1. YouTube combined search+download (yt-dlp — fastest path)
       2. SoundCloud (yt-dlp — great for remixes, indie tracks)
       3. JioSaavn (free API — best for Hindi/Bengali/Indian songs)
       4. Piped (YouTube alternative frontend, no cookies)
@@ -975,17 +1000,13 @@ def search_and_get_media(query: str, video: bool):
     if random.random() < 0.3:
         cleanup_downloads()
 
-    # === Source 1: YouTube (yt-dlp) ===
-    LOGGER.info("=== Source 1: YouTube ===")
+    # === Source 1: YouTube combined search+download ===
+    LOGGER.info("=== Source 1: YouTube (combined) ===")
     try:
-        yt_info = _youtube_search(query)
-        if yt_info:
-            path = _youtube_download(yt_info["link"], video)
-            if path:
-                return path, yt_info
-            errors.append("YouTube: download failed (bot detection)")
-        else:
-            errors.append("YouTube: search failed")
+        path, info = _youtube_search_and_download(query, video)
+        if path and info:
+            return path, info
+        errors.append("YouTube: search or download failed")
     except Exception as e:
         errors.append(f"YT: {str(e)[:50]}")
 
