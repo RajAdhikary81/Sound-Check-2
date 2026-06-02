@@ -10,7 +10,7 @@
     "BOT_TOKEN": { "description": "@BotFather থেকে নিন", "value": "", "required": true },
     "MONGO_DB_URI": { "description": "MongoDB connection URL", "value": "", "required": true },
     "OWNER_ID": { "description": "আপনার Telegram User ID", "value": "", "required": true },
-    "OWNER_USERNAME": { "description": "@ ছাড়া আপনার username", "value": "R4J_81", "required": false },
+    "OWNER_USERNAME": { "description": "@ ছাড়া আপনার Telegram username (যেমন: MyUsername)", "value": "", "required": false },
     "STRING_SESSION": { "description": "Pyrogram v2 String Session (spare account দিয়ে)", "value": "", "required": true },
     "LOG_GROUP_ID": { "description": "Log group ID (বটকে admin করতে হবে)", "value": "", "required": true },
     "SUPPORT_GROUP": { "description": "সাপোর্ট গ্রুপ লিংক", "value": "", "required": false },

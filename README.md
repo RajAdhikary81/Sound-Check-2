@@ -568,9 +568,13 @@ MusicBangla/
 ├── package.json           # Node.js (py-tgcalls dependency)
 ├── runtime.txt            # Python version
 ├── generate_session.py    # String session generator
+├── .github/
+│   └── workflows/
+│       └── credit-check.yml  # CI: developer credit integrity check
 └── MusicBangla/
     ├── __init__.py        # App init (bot + assistant + calls)
-    ├── __main__.py        # Entry point
+    ├── __main__.py        # Entry point (with credit verification)
+    ├── credit_guard.py    # Developer credit integrity guard (DO NOT MODIFY)
     ├── database.py        # MongoDB async layer
     ├── utils.py           # Utility functions
     └── plugins/
@@ -666,6 +670,13 @@ git commit -m "Add your feature"
 # Push ও PR তৈরি করো
 git push origin feature/your-feature
 ```
+
+> **Fork করার নিয়ম:**
+> - `config.py`-তে `DEVELOPER_USERNAME`, `DEVELOPER_URL`, `DEVELOPER_GITHUB`, `ORIGINAL_REPO`, `_CREDIT_SIGNATURE` পরিবর্তন করা যাবে না
+> - `MusicBangla/credit_guard.py` ফাইল ডিলিট বা মডিফাই করা যাবে না
+> - `OWNER_USERNAME` ও `OWNER_ID` নিজের মতো সেট করা যাবে — এগুলো আপনার (ব্যবহারকারীর) তথ্য
+> - নতুন ফিচার যোগ করতে পারবেন, প্লাগিন বানাতে পারবেন — শুধু ক্রেডিট রাখতে হবে
+> - CI চেক (GitHub Actions) অটো ক্রেডিট ভেরিফাই করবে — ক্রেডিট সরালে PR মার্জ হবে না
 
 ---
 

@@ -1,0 +1,10 @@
+# CODEOWNERS — Protected files that only the original developer can modify
+# GitHub will automatically request review from @RajSukh81 for PRs touching these files
+
+# Credit protection files — only original developer can approve changes
+/config.py @RajSukh81
+/LICENSE @RajSukh81
+/MusicBangla/credit_guard.py @RajSukh81
+/MusicBangla/__main__.py @RajSukh81
+/.github/workflows/credit-check.yml @RajSukh81
+/.github/CODEOWNERS @RajSukh81
