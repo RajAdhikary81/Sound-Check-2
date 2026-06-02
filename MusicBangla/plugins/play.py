@@ -121,14 +121,14 @@ def _base_opts():
         "no_warnings": True,
         "noplaylist": True,
         "socket_timeout": 30,
-        "retries": 5,
-        "fragment_retries": 5,
+        "retries": 10,
+        "fragment_retries": 10,
         "geo_bypass": True,
         "nocheckcertificate": True,
         "no_check_formats": True,
         "check_formats": False,
         "source_address": "0.0.0.0",
-        "extractor_retries": 3,
+        "extractor_retries": 6,
         "http_headers": {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -441,8 +441,11 @@ def _youtube_search(query: str):
     if _COOKIE_FILE:
         search_strategies.append((_COOKIE_FILE, ["web_creator"], "cookies+web_creator"))
         search_strategies.append((_COOKIE_FILE, ["web"], "cookies+web"))
+        search_strategies.append((_COOKIE_FILE, ["mediaconnect"], "cookies+mediaconnect"))
     search_strategies.append((None, ["mediaconnect"], "mediaconnect"))
     search_strategies.append((None, ["web_creator"], "web_creator"))
+    search_strategies.append((None, ["tv"], "tv"))
+    search_strategies.append((None, ["mweb"], "mweb"))
     search_strategies.append((None, None, "default"))
 
     for cookie, player_client, desc in search_strategies:
@@ -455,7 +458,7 @@ def _youtube_search(query: str):
                 opts["extractor_args"] = {"youtube": {"player_client": player_client}}
 
             with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(f"ytsearch3:{query}", download=False)
+                info = ydl.extract_info(f"ytsearch5:{query}", download=False)
 
                 entries = []
                 if info and info.get("_type") == "playlist" and info.get("entries"):
@@ -506,10 +509,13 @@ def _youtube_download(url: str, video: bool) -> str:
         strategies.append((_COOKIE_FILE, ["web"], "cookies+web"))
         strategies.append((_COOKIE_FILE, ["ios"], "cookies+ios"))
         strategies.append((_COOKIE_FILE, ["mweb"], "cookies+mweb"))
+        strategies.append((_COOKIE_FILE, ["tv"], "cookies+tv"))
+        strategies.append((_COOKIE_FILE, ["mediaconnect"], "cookies+mediaconnect"))
     strategies.append((None, ["mediaconnect"], "mediaconnect"))
     strategies.append((None, ["web_creator"], "web_creator"))
     strategies.append((None, ["tv"], "tv"))
     strategies.append((None, ["mweb"], "mweb"))
+    strategies.append((None, ["ios"], "ios"))
     strategies.append((None, None, "default"))
 
     for cookie, player_client, desc in strategies:
@@ -541,7 +547,7 @@ def _youtube_download(url: str, video: bool) -> str:
             LOGGER.warning(f"YT [{desc}]: {emsg}")
             if "Sign in to confirm" in emsg and not cookie:
                 continue
-        time.sleep(0.3)
+        time.sleep(0.2)
 
     return None
 
@@ -1172,7 +1178,7 @@ async def ensure_assistant(chat_id: int):
     return False
 
 
-async def try_play_stream(chat_id, media_path, video, max_retries=4):
+async def try_play_stream(chat_id, media_path, video, max_retries=6):
     if video:
         stream = MediaStream(
             media_path,
