@@ -30,6 +30,7 @@ ACTIVE_CHATS = {}   # chat_id -> current song info
 QUEUES = {}         # chat_id -> deque of (query, video, requester_mention)
 _NP_MESSAGES = {}   # chat_id -> (message_obj, info, video, requester, start_time)
 _NP_TASKS = {}      # chat_id -> asyncio.Task for progress updater
+_SKIP_ACTIVE = set()  # chat_ids where skip is in progress (prevents double-trigger)
 
 _USER_COOLDOWN = {}
 _COOLDOWN_SECONDS = 5
@@ -1249,14 +1250,22 @@ def _build_now_playing(info: dict, video: bool, requester: str,
 
     progress = _build_progress_bar(elapsed, total)
 
+    title = info.get('title', '?')
+    channel = info.get('channel', '?')
+    source = info.get('source', '?')
+
     caption = (
-        f"{spin} <b>{info.get('title', '?')}</b>\n"
-        f"{progress}\n\n"
-        f"{icon} {mode} | 🎤 {info.get('channel', '?')}\n"
-        f"📡 {info.get('source', '?')} | 🙋 {requester}"
+        f"╭─────────────────────╮\n"
+        f"  {spin} <b>এখন বাজছে</b>\n"
+        f"╰─────────────────────╯\n\n"
+        f"  <b>❝ {title} ❞</b>\n\n"
+        f"  {progress}\n\n"
+        f"  {icon} {mode}  ┃  🎤 {channel}\n"
+        f"  📡 {source}  ┃  🙋 {requester}\n"
     )
     if queue_len > 0:
-        caption += f"\n📋 কিউ: {queue_len} টি বাকি"
+        caption += f"\n  📋 কিউতে আরো <b>{queue_len}</b> টি গান আছে"
+    caption += f"\n╭─────────────────────╮\n  ✦ <b>MusicBangla</b> ✦\n╰─────────────────────╯"
     return caption
 
 
@@ -1457,6 +1466,10 @@ async def play_next_in_queue(chat_id: int):
 async def _on_stream_end(client, update):
     chat_id = update.chat_id
     LOGGER.info(f"Stream ended in {chat_id}")
+    # If skip is active, skip_cmd will handle play_next_in_queue — avoid double trigger
+    if chat_id in _SKIP_ACTIVE:
+        LOGGER.info(f"Skip active for {chat_id}, ignoring stream_end")
+        return
     await play_next_in_queue(chat_id)
 
 
@@ -1795,9 +1808,17 @@ async def ctl_skip_cb(client, query):
     chat_id = query.message.chat.id
     try:
         _stop_progress(chat_id)
+        _SKIP_ACTIVE.add(chat_id)
         await query.answer("⏭ স্কিপ হচ্ছে...")
+        try:
+            await calls.leave_call(chat_id)
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
         await play_next_in_queue(chat_id)
+        _SKIP_ACTIVE.discard(chat_id)
     except Exception:
+        _SKIP_ACTIVE.discard(chat_id)
         await query.answer("⏭ স্কিপ করতে পারছি না!", show_alert=True)
 
 
@@ -1806,16 +1827,23 @@ async def ctl_stop_cb(client, query):
     chat_id = query.message.chat.id
     try:
         _stop_progress(chat_id)
+        _SKIP_ACTIVE.add(chat_id)
         ACTIVE_CHATS.pop(chat_id, None)
         if chat_id in QUEUES:
             QUEUES[chat_id].clear()
-        await calls.leave_call(chat_id)
+        try:
+            await calls.leave_call(chat_id)
+        except Exception:
+            pass
+        await asyncio.sleep(0.3)
+        _SKIP_ACTIVE.discard(chat_id)
         await query.answer("🛑 বন্ধ করা হয়েছে")
         try:
             await query.message.delete()
         except Exception:
             pass
     except Exception:
+        _SKIP_ACTIVE.discard(chat_id)
         await query.answer("🛑 বন্ধ করতে পারছি না!", show_alert=True)
 
 

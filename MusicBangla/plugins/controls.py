@@ -4,7 +4,7 @@ from pyrogram.types import Message
 
 import config
 from MusicBangla import app, calls, LOGGER
-from MusicBangla.plugins.play import ACTIVE_CHATS, QUEUES, play_next_in_queue, _stop_progress
+from MusicBangla.plugins.play import ACTIVE_CHATS, QUEUES, play_next_in_queue, _stop_progress, _SKIP_ACTIVE
 
 
 async def react(client, message, emoji):
@@ -45,10 +45,16 @@ async def skip_cmd(client, message: Message):
     _stop_progress(chat_id)
 
     try:
+        # Mark skip as active so stream_end handler won't double-trigger
+        _SKIP_ACTIVE.add(chat_id)
+
         try:
             await calls.leave_call(chat_id)
         except Exception:
             pass
+
+        # Small delay to let stream_end fire and get ignored
+        await asyncio.sleep(0.5)
 
         if queue:
             await message.reply_text(
@@ -59,7 +65,6 @@ async def skip_cmd(client, message: Message):
                 await message.reply_sticker(config.random_queue_sticker())
             except Exception:
                 pass
-            await asyncio.sleep(1)
             await play_next_in_queue(chat_id)
         else:
             ACTIVE_CHATS.pop(chat_id, None)
@@ -67,7 +72,10 @@ async def skip_cmd(client, message: Message):
                 "⏭ <b>গান স্কিপ করা হলো।</b>\n"
                 "কিউ খালি। নতুন গান: <code>/play</code>"
             )
+
+        _SKIP_ACTIVE.discard(chat_id)
     except Exception as e:
+        _SKIP_ACTIVE.discard(chat_id)
         LOGGER.error(e)
         await message.reply_text(f"{config.random_error_emoji()} স্কিপ করা যাচ্ছে না।")
 
@@ -80,6 +88,7 @@ async def stop_cmd(client, message: Message):
 
     try:
         _stop_progress(chat_id)
+        _SKIP_ACTIVE.add(chat_id)
         ACTIVE_CHATS.pop(chat_id, None)
         if chat_id in QUEUES:
             QUEUES[chat_id].clear()
@@ -87,6 +96,8 @@ async def stop_cmd(client, message: Message):
             await calls.leave_call(chat_id)
         except Exception:
             pass
+        await asyncio.sleep(0.3)
+        _SKIP_ACTIVE.discard(chat_id)
         await message.reply_text(
             "🛑 <b>স্ট্রিম বন্ধ ও কিউ পরিষ্কার।</b>\n"
             "ধন্যবাদ গান উপভোগ করার জন্য 💝"
@@ -96,5 +107,6 @@ async def stop_cmd(client, message: Message):
         except Exception:
             pass
     except Exception as e:
+        _SKIP_ACTIVE.discard(chat_id)
         LOGGER.error(e)
         await message.reply_text(f"{config.random_error_emoji()} স্টপ করা যাচ্ছে না।")
