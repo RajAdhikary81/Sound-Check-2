@@ -17,6 +17,11 @@ SUPPORT_GROUP = os.environ.get("SUPPORT_GROUP", "")
 SUPPORT_CHANNEL = os.environ.get("SUPPORT_CHANNEL", "")
 GITHUB_URL = "https://github.com/RajSukh81/MusicBangla"
 
+# --- Original Developer (hardcoded — DO NOT change) ---
+# এই তথ্য পরিবর্তন করা নিষেধ। এটি মূল ডেভেলপারের ক্রেডিট।
+DEVELOPER_USERNAME = "R4J_81"
+DEVELOPER_URL = "https://t.me/R4J_81"
+
 START_IMAGES = [
     "https://pic-link-bot.lovable.app/i/telegram-1779340031479-5eab5504.jpg",
     "https://pic-link-bot.lovable.app/i/telegram-1779340095109-3b9afb55.jpg",

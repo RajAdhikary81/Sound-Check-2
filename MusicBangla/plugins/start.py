@@ -23,6 +23,9 @@ def main_buttons():
                 InlineKeyboardButton("👨‍💻 মালিক", url=f"https://t.me/{config.OWNER_USERNAME}"),
                 InlineKeyboardButton("📁 সোর্স", url=config.GITHUB_URL),
             ],
+            [
+                InlineKeyboardButton("🧑‍💻 ডেভেলপার", url=config.DEVELOPER_URL),
+            ],
         ]
     )
 
@@ -66,6 +69,7 @@ async def start_private(client, message: Message):
             f"Spotify | Gaana | Deezer | Tidal | Amazon Music\n"
             f"Wynk | Resso | YouTube Music — সব লিংক চলে!\n\n"
             f"💝 <b>মালিক:</b> @{config.OWNER_USERNAME}\n"
+            f"🧑‍💻 <b>ডেভেলপার:</b> @{config.DEVELOPER_USERNAME}\n"
             f"📢 <b>চ্যানেল:</b> {config.SUPPORT_CHANNEL}"
         )
         await message.reply_photo(

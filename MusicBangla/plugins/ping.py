@@ -27,7 +27,8 @@ async def ping_cmd(client, message: Message):
         f"👥 <b>মোট ইউজার:</b> <code>{users}</code>\n"
         f"💬 <b>মোট গ্রুপ:</b> <code>{chats}</code>\n"
         f"🤖 <b>স্ট্যাটাস:</b> অনলাইন ✅\n\n"
-        f"💝 মালিক: @{config.OWNER_USERNAME}"
+        f"💝 মালিক: @{config.OWNER_USERNAME}\n"
+        f"🧑‍💻 ডেভেলপার: @{config.DEVELOPER_USERNAME}"
     )
 
 

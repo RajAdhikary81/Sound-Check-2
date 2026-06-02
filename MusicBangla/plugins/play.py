@@ -193,6 +193,10 @@ def _play_buttons(song_link: str = "") -> InlineKeyboardMarkup:
         ),
         InlineKeyboardButton(f"{t['close']} বন্ধ", callback_data="close_play_msg"),
     ])
+    # Row 4: Developer credit (hardcoded — always visible)
+    rows.append([
+        InlineKeyboardButton("🧑‍💻 ডেভেলপার @R4J_81", url=config.DEVELOPER_URL),
+    ])
     return InlineKeyboardMarkup(rows)
 
 
@@ -1292,7 +1296,7 @@ def _build_now_playing(info: dict, video: bool, requester: str,
     )
     if queue_len > 0:
         caption += f"\n  📋 কিউতে আরো <b>{queue_len}</b> টি গান আছে"
-    caption += f"\n╭─────────────────────╮\n  ✦ <b>MusicBangla</b> ✦\n╰─────────────────────╯"
+    caption += f"\n╭─────────────────────╮\n  ✦ <b>MusicBangla</b> ✦\n  🧑‍💻 Dev: @{config.DEVELOPER_USERNAME}\n╰─────────────────────╯"
     return caption
 
 
