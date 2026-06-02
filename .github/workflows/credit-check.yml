@@ -1,0 +1,99 @@
+name: Credit Integrity Check
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: ["*"]
+  fork:
+
+jobs:
+  credit-check:
+    name: Verify Original Developer Credit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify developer credit in config.py
+        run: |
+          echo "🔍 Checking developer credit integrity..."
+          ERRORS=0
+
+          # Check DEVELOPER_USERNAME
+          if ! grep -q 'DEVELOPER_USERNAME = "R4J_81"' config.py; then
+            echo "❌ DEVELOPER_USERNAME has been tampered with!"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check DEVELOPER_URL
+          if ! grep -q 'DEVELOPER_URL = "https://t.me/R4J_81"' config.py; then
+            echo "❌ DEVELOPER_URL has been tampered with!"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check DEVELOPER_GITHUB
+          if ! grep -q 'DEVELOPER_GITHUB = "https://github.com/RajSukh81"' config.py; then
+            echo "❌ DEVELOPER_GITHUB has been tampered with!"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check ORIGINAL_REPO
+          if ! grep -q 'ORIGINAL_REPO = "https://github.com/RajSukh81/MusicBangla"' config.py; then
+            echo "❌ ORIGINAL_REPO has been tampered with!"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check _CREDIT_SIGNATURE
+          if ! grep -q '_CREDIT_SIGNATURE = "R4J_81::RajSukh81::MusicBangla::2025"' config.py; then
+            echo "❌ _CREDIT_SIGNATURE has been tampered with!"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check credit_guard.py exists and is intact
+          if [ ! -f "MusicBangla/credit_guard.py" ]; then
+            echo "❌ MusicBangla/credit_guard.py is MISSING!"
+            ERRORS=$((ERRORS + 1))
+          else
+            if ! grep -q 'ORIGINAL_DEVELOPER = "R4J_81"' MusicBangla/credit_guard.py; then
+              echo "❌ credit_guard.py has been tampered with!"
+              ERRORS=$((ERRORS + 1))
+            fi
+          fi
+
+          # Check LICENSE attribution
+          if ! grep -q 'RajSukh81 (@R4J_81)' LICENSE; then
+            echo "❌ LICENSE attribution has been tampered with!"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          # Check __main__.py still imports credit_guard
+          if ! grep -q 'from MusicBangla.credit_guard import verify_credit' MusicBangla/__main__.py; then
+            echo "❌ Credit guard import removed from __main__.py!"
+            ERRORS=$((ERRORS + 1))
+          fi
+          if ! grep -q 'verify_credit()' MusicBangla/__main__.py; then
+            echo "❌ verify_credit() call removed from __main__.py!"
+            ERRORS=$((ERRORS + 1))
+          fi
+
+          if [ $ERRORS -gt 0 ]; then
+            echo ""
+            echo "══════════════════════════════════════════════════════════════"
+            echo "🚨 CREDIT INTEGRITY VIOLATION DETECTED!"
+            echo "══════════════════════════════════════════════════════════════"
+            echo ""
+            echo "  MusicBangla original developer: @R4J_81"
+            echo "  GitHub: https://github.com/RajSukh81/MusicBangla"
+            echo ""
+            echo "  Removing or modifying original developer credit violates"
+            echo "  the project license. Please restore the original values."
+            echo ""
+            echo "══════════════════════════════════════════════════════════════"
+            exit 1
+          fi
+
+          echo "✅ All credit integrity checks passed!"
+          echo "  Developer: @R4J_81"
+          echo "  GitHub: https://github.com/RajSukh81"

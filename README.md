@@ -681,6 +681,26 @@ git push origin feature/your-feature
 
 ---
 
+## 🛡️ Credit & Attribution / ক্রেডিট ও অ্যাট্রিবিউশন
+
+> **এই প্রজেক্টের মূল ডেভেলপার [@R4J_81](https://t.me/R4J_81) ([RajSukh81](https://github.com/RajSukh81))।**
+>
+> Fork বা ব্যবহার করলে নিচের শর্তগুলো মানতে হবে:
+>
+> 1. **ক্রেডিট সবসময় দেখাতে হবে** — বটের `/start` মেসেজ, README, ও সোর্স কোডে মূল ডেভেলপারের ক্রেডিট অবশ্যই রাখতে হবে।
+> 2. **ক্রেডিট পরিবর্তন করা যাবে না** — `config.py`, `credit_guard.py`, ও `LICENSE` ফাইলের ডেভেলপার তথ্য পরিবর্তন করা লাইসেন্স লঙ্ঘন।
+> 3. **বট নিজে ভেরিফাই করে** — প্রতিটি স্টার্টআপে ক্রেডিট ইন্টিগ্রিটি চেক হয়। টেম্পার করলে বট চালু হবে না।
+> 4. **CI/CD চেক** — প্রতিটি push/PR-এ GitHub Actions ক্রেডিট ভেরিফাই করে। ক্রেডিট সরালে CI ফেইল করবে।
+>
+> ```
+> Original Developer: @R4J_81
+> Telegram: https://t.me/R4J_81
+> GitHub: https://github.com/RajSukh81
+> Repository: https://github.com/RajSukh81/MusicBangla
+> ```
+
+---
+
 ## ⭐ Support / সমর্থন করুন
 
 > এই প্রজেক্ট ভালো লাগলে একটা **⭐ Star** দিয়ে সমর্থন জানান!

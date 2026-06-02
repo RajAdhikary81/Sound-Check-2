@@ -17,10 +17,17 @@ SUPPORT_GROUP = os.environ.get("SUPPORT_GROUP", "")
 SUPPORT_CHANNEL = os.environ.get("SUPPORT_CHANNEL", "")
 GITHUB_URL = "https://github.com/RajSukh81/MusicBangla"
 
-# --- Original Developer (hardcoded — DO NOT change) ---
-# এই তথ্য পরিবর্তন করা নিষেধ। এটি মূল ডেভেলপারের ক্রেডিট।
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  ORIGINAL DEVELOPER CREDIT — TAMPER-PROTECTED                  ║
+# ║  এই তথ্য পরিবর্তন করা সম্পূর্ণ নিষিদ্ধ।                      ║
+# ║  Changing these values will BREAK the bot (integrity check).    ║
+# ║  Fork করলেও এই ক্রেডিট অবশ্যই বজায় রাখতে হবে।               ║
+# ╚══════════════════════════════════════════════════════════════════╝
 DEVELOPER_USERNAME = "R4J_81"
 DEVELOPER_URL = "https://t.me/R4J_81"
+DEVELOPER_GITHUB = "https://github.com/RajSukh81"
+ORIGINAL_REPO = "https://github.com/RajSukh81/MusicBangla"
+_CREDIT_SIGNATURE = "R4J_81::RajSukh81::MusicBangla::2025"
 
 START_IMAGES = [
     "https://pic-link-bot.lovable.app/i/telegram-1779340031479-5eab5504.jpg",

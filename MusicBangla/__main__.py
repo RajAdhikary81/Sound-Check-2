@@ -4,6 +4,14 @@ from pyrogram import idle
 from MusicBangla import app, assistant, calls, LOGGER
 import config
 
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  CREDIT INTEGRITY CHECK — runs BEFORE anything else         ║
+# ║  মূল ডেভেলপার @R4J_81-এর ক্রেডিট ভেরিফাই করে।             ║
+# ║  টেম্পার করলে বট চালু হবে না। DO NOT REMOVE.               ║
+# ╚══════════════════════════════════════════════════════════════╝
+from MusicBangla.credit_guard import verify_credit
+verify_credit()
+
 # Heroku Config Var থেকে YouTube cookies লোড করার কোড
 _yt_cookies = os.environ.get("YT_COOKIES")
 if _yt_cookies:
