@@ -4,7 +4,7 @@ from pyrogram.types import Message
 
 import config
 from MusicBangla import app, calls, LOGGER
-from MusicBangla.plugins.play import ACTIVE_CHATS, QUEUES, play_next_in_queue
+from MusicBangla.plugins.play import ACTIVE_CHATS, QUEUES, play_next_in_queue, _stop_progress
 
 
 async def react(client, message, emoji):
@@ -42,6 +42,7 @@ async def skip_cmd(client, message: Message):
     await react(client, message, "⏭")
     chat_id = message.chat.id
     queue = QUEUES.get(chat_id, [])
+    _stop_progress(chat_id)
 
     try:
         try:
@@ -78,6 +79,7 @@ async def stop_cmd(client, message: Message):
     chat_id = message.chat.id
 
     try:
+        _stop_progress(chat_id)
         ACTIVE_CHATS.pop(chat_id, None)
         if chat_id in QUEUES:
             QUEUES[chat_id].clear()

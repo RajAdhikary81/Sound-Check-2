@@ -28,6 +28,8 @@ os.makedirs("downloads", exist_ok=True)
 
 ACTIVE_CHATS = {}   # chat_id -> current song info
 QUEUES = {}         # chat_id -> deque of (query, video, requester_mention)
+_NP_MESSAGES = {}   # chat_id -> (message_obj, info, video, requester, start_time)
+_NP_TASKS = {}      # chat_id -> asyncio.Task for progress updater
 
 _USER_COOLDOWN = {}
 _COOLDOWN_SECONDS = 5
@@ -162,26 +164,33 @@ def cleanup_downloads():
 def _play_buttons(song_link: str = "") -> InlineKeyboardMarkup:
     t = _get_theme()
     rows = []
-    row1 = []
+    # Row 1: Control buttons
+    rows.append([
+        InlineKeyboardButton("⏸ পজ", callback_data="ctl_pause"),
+        InlineKeyboardButton("▶️ চালু", callback_data="ctl_resume"),
+        InlineKeyboardButton("⏭ স্কিপ", callback_data="ctl_skip"),
+        InlineKeyboardButton("🛑 বন্ধ", callback_data="ctl_stop"),
+    ])
+    # Row 2: Song link + add to group
+    row2 = []
     if song_link and song_link.startswith("http"):
-        row1.append(InlineKeyboardButton(f"{t['song']} গান দেখো", url=song_link))
-    row1.append(
+        row2.append(InlineKeyboardButton(f"{t['song']} গান", url=song_link))
+    row2.append(
         InlineKeyboardButton(
-            f"{t['add']} গ্রুপে যোগ করো",
+            f"{t['add']} গ্রুপে যোগ",
             url="https://t.me/MusicBanglaBot?startgroup=true",
         )
     )
-    rows.append(row1)
+    rows.append(row2)
+    # Row 3: Channel + support + owner + close
     rows.append([
         InlineKeyboardButton(f"{t['channel']} চ্যানেল", url=config.SUPPORT_CHANNEL),
         InlineKeyboardButton(f"{t['support']} সাপোর্ট", url=config.SUPPORT_GROUP),
-    ])
-    rows.append([
         InlineKeyboardButton(
             f"{t['owner']} মালিক",
             url=f"https://t.me/{config.OWNER_USERNAME}",
         ),
-        InlineKeyboardButton(f"{t['close']} বন্ধ করো", callback_data="close_play_msg"),
+        InlineKeyboardButton(f"{t['close']} বন্ধ", callback_data="close_play_msg"),
     ])
     return InlineKeyboardMarkup(rows)
 
@@ -1210,54 +1219,64 @@ _NP_THEMES = [
     {"bar": "⚡", "icon": "🎺", "vid": "📡"},
 ]
 
+# --- Animated progress symbols (rotate every 5s) ---
+_PROGRESS_FRAMES = ["🎵", "🎶", "🎧", "🎤", "🎸", "🎹", "🎷", "🎺", "💿", "🪩"]
+
+
+def _build_progress_bar(elapsed: int, total: int, width: int = 12) -> str:
+    """Build a text progress bar showing song position."""
+    if total <= 0:
+        return "▶️ 🔘▬▬▬▬▬▬▬▬▬▬▬ 🔴 LIVE"
+    ratio = min(elapsed / total, 1.0)
+    filled = int(ratio * width)
+    bar = "▬" * filled + "🔘" + "▬" * (width - filled)
+    return f"▶️ {bar}  {fmt_dur(elapsed)} / {fmt_dur(total)}"
+
+
+def _get_spin_symbol(elapsed: int) -> str:
+    """Get animated symbol that changes every 5 seconds."""
+    idx = (elapsed // 5) % len(_PROGRESS_FRAMES)
+    return _PROGRESS_FRAMES[idx]
+
+
 def _build_now_playing(info: dict, video: bool, requester: str,
-                       queue_len: int = 0) -> str:
+                       queue_len: int = 0, elapsed: int = 0) -> str:
     t = random.choice(_NP_THEMES)
     icon = t["vid"] if video else t["icon"]
     mode = "ভিডিও" if video else "অডিও"
-    source_name = info.get("source", "?")
-    bar = t["bar"]
+    total = info.get("duration", 0) or 0
+    spin = _get_spin_symbol(elapsed)
+
+    progress = _build_progress_bar(elapsed, total)
 
     caption = (
-        f"╭{'─' * 23}╮\n"
-        f"  {icon} <b>এখন {mode} বাজছে</b>\n"
-        f"╰{'─' * 23}╯\n\n"
-        f"{bar} <b>শিরোনাম:</b> {info.get('title', '?')}\n"
-        f"⏱ <b>সময়:</b> <code>{fmt_dur(info.get('duration'))}</code>\n"
-        f"🎤 <b>শিল্পী:</b> {info.get('channel', '?')}\n"
-        f"📡 <b>সোর্স:</b> {source_name}\n"
-        f"🎧 <b>মোড:</b> {mode}\n"
-        f"🙋 <b>অনুরোধ:</b> {requester}\n"
+        f"{spin} <b>{info.get('title', '?')}</b>\n"
+        f"{progress}\n\n"
+        f"{icon} {mode} | 🎤 {info.get('channel', '?')}\n"
+        f"📡 {info.get('source', '?')} | 🙋 {requester}"
     )
     if queue_len > 0:
-        caption += f"📋 <b>কিউতে বাকি:</b> {queue_len} টি\n"
-    caption += (
-        f"\n╭── <b>কন্ট্রোল</b> ──╮\n"
-        f"⏸ <code>/pause</code>  ▶️ <code>/resume</code>\n"
-        f"⏭ <code>/skip</code>   🛑 <code>/stop</code>\n"
-        f"📋 <code>/queue</code>\n"
-        f"╰─────────────────╯\n\n"
-        f"🌐 YouTube | SoundCloud | JioSaavn | Apple Music | Spotify"
-    )
+        caption += f"\n📋 কিউ: {queue_len} টি বাকি"
     return caption
 
 
 async def send_now_playing(chat_id, info, video, requester, queue_len=0):
-    caption = _build_now_playing(info, video, requester, queue_len)
+    caption = _build_now_playing(info, video, requester, queue_len, elapsed=0)
     buttons = _play_buttons(info.get("link", ""))
     thumb = info.get("thumb", "")
+    np_msg = None
     try:
         if thumb and thumb.startswith("http"):
-            await app.send_photo(
+            np_msg = await app.send_photo(
                 chat_id, photo=thumb, caption=caption, reply_markup=buttons
             )
         else:
-            await app.send_message(chat_id, caption, reply_markup=buttons)
+            np_msg = await app.send_message(chat_id, caption, reply_markup=buttons)
     except Exception:
         try:
-            await app.send_message(chat_id, caption, reply_markup=buttons)
+            np_msg = await app.send_message(chat_id, caption, reply_markup=buttons)
         except Exception:
-            await app.send_message(chat_id, caption)
+            np_msg = await app.send_message(chat_id, caption)
 
     # Send big emoji reaction message
     try:
@@ -1265,6 +1284,60 @@ async def send_now_playing(chat_id, info, video, requester, queue_len=0):
         await app.send_message(chat_id, big)
     except Exception:
         pass
+
+    # Start progress updater task
+    start_time = time.time()
+    _NP_MESSAGES[chat_id] = (np_msg, info, video, requester, start_time)
+    # Cancel any existing updater
+    old_task = _NP_TASKS.pop(chat_id, None)
+    if old_task and not old_task.done():
+        old_task.cancel()
+    _NP_TASKS[chat_id] = asyncio.create_task(_progress_updater(chat_id))
+
+
+async def _progress_updater(chat_id: int):
+    """Update now-playing message every 5 seconds with animated progress."""
+    try:
+        while chat_id in _NP_MESSAGES and chat_id in ACTIVE_CHATS:
+            await asyncio.sleep(5)
+            data = _NP_MESSAGES.get(chat_id)
+            if not data:
+                break
+            np_msg, info, video, requester, start_time = data
+            if not np_msg:
+                break
+
+            elapsed = int(time.time() - start_time)
+            total = info.get("duration", 0) or 0
+
+            # Stop updating if song should be over (with 10s buffer)
+            if total > 0 and elapsed > total + 10:
+                break
+
+            queue_len = len(QUEUES.get(chat_id, []))
+            new_caption = _build_now_playing(info, video, requester, queue_len, elapsed)
+            buttons = _play_buttons(info.get("link", ""))
+
+            try:
+                if np_msg.photo:
+                    await np_msg.edit_caption(caption=new_caption, reply_markup=buttons)
+                else:
+                    await np_msg.edit_text(new_caption, reply_markup=buttons)
+            except Exception:
+                # Message may have been deleted or unchanged
+                pass
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        pass
+
+
+def _stop_progress(chat_id: int):
+    """Stop progress updater for a chat."""
+    _NP_MESSAGES.pop(chat_id, None)
+    task = _NP_TASKS.pop(chat_id, None)
+    if task and not task.done():
+        task.cancel()
 
 
 # =====================================================
@@ -1274,6 +1347,7 @@ async def send_now_playing(chat_id, info, video, requester, queue_len=0):
 async def play_next_in_queue(chat_id: int):
     LOGGER.info(f"play_next_in_queue for {chat_id}")
     ACTIVE_CHATS.pop(chat_id, None)
+    _stop_progress(chat_id)
 
     if chat_id not in QUEUES or not QUEUES[chat_id]:
         LOGGER.info(f"Queue empty for {chat_id}, leaving VC")
@@ -1691,9 +1765,58 @@ async def _play(client, message: Message, video: bool):
 @app.on_callback_query(filters.regex("^close_play_msg$"))
 async def close_play_msg_cb(client, query):
     try:
+        chat_id = query.message.chat.id
+        _stop_progress(chat_id)
         await query.message.delete()
     except Exception:
         await query.answer("মুছতে পারছি না!", show_alert=True)
+
+
+@app.on_callback_query(filters.regex("^ctl_pause$"))
+async def ctl_pause_cb(client, query):
+    try:
+        await calls.pause(query.message.chat.id)
+        await query.answer("⏸ পজ করা হয়েছে")
+    except Exception:
+        await query.answer("⏸ পজ করতে পারছি না!", show_alert=True)
+
+
+@app.on_callback_query(filters.regex("^ctl_resume$"))
+async def ctl_resume_cb(client, query):
+    try:
+        await calls.resume(query.message.chat.id)
+        await query.answer("▶️ আবার চালু হয়েছে")
+    except Exception:
+        await query.answer("▶️ চালু করতে পারছি না!", show_alert=True)
+
+
+@app.on_callback_query(filters.regex("^ctl_skip$"))
+async def ctl_skip_cb(client, query):
+    chat_id = query.message.chat.id
+    try:
+        _stop_progress(chat_id)
+        await query.answer("⏭ স্কিপ হচ্ছে...")
+        await play_next_in_queue(chat_id)
+    except Exception:
+        await query.answer("⏭ স্কিপ করতে পারছি না!", show_alert=True)
+
+
+@app.on_callback_query(filters.regex("^ctl_stop$"))
+async def ctl_stop_cb(client, query):
+    chat_id = query.message.chat.id
+    try:
+        _stop_progress(chat_id)
+        ACTIVE_CHATS.pop(chat_id, None)
+        if chat_id in QUEUES:
+            QUEUES[chat_id].clear()
+        await calls.leave_call(chat_id)
+        await query.answer("🛑 বন্ধ করা হয়েছে")
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+    except Exception:
+        await query.answer("🛑 বন্ধ করতে পারছি না!", show_alert=True)
 
 
 @app.on_message(filters.command(["play", "p"]) & filters.group)
