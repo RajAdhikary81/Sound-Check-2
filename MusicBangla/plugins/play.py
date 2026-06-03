@@ -124,20 +124,33 @@ def _base_opts():
         "retries": 10,
         "fragment_retries": 10,
         "geo_bypass": True,
+        "geo_bypass_country": "US",
         "nocheckcertificate": True,
         "no_check_formats": True,
         "check_formats": False,
         "source_address": "0.0.0.0",
         "extractor_retries": 6,
+        "age_limit": None,
         "http_headers": {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/136.0.0.0 Safari/537.36"
+                "Chrome/137.0.0.0 Safari/537.36"
             ),
             "Accept-Language": "en-US,en;q=0.9",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         },
     }
+    # Load PO token from env if available (helps bypass YouTube bot detection)
+    po_token = os.environ.get("PO_TOKEN", "")
+    visitor_data = os.environ.get("VISITOR_DATA", "")
+    if po_token and visitor_data:
+        opts["extractor_args"] = {
+            "youtube": {
+                "po_token": [f"web+{po_token}"],
+                "visitor_data": [visitor_data],
+            }
+        }
     return opts
 
 
@@ -246,6 +259,8 @@ def _soundcloud_search_and_download(query: str, video: bool):
 
     try:
         opts = _base_opts()
+        # Remove YouTube-specific po_token args for SoundCloud
+        opts.pop("extractor_args", None)
         opts["outtmpl"] = "downloads/sc_%(id)s.%(ext)s"
         opts["format"] = "best"
 
@@ -270,6 +285,8 @@ def _soundcloud_search_and_download(query: str, video: bool):
         LOGGER.info(f"SoundCloud: downloading '{best.get('title', '?')}'")
         suffix = "_v" if video else ""
         dl_opts = _base_opts()
+        # Remove YouTube-specific po_token args for SoundCloud
+        dl_opts.pop("extractor_args", None)
         dl_opts["outtmpl"] = f"downloads/sc_%(id)s{suffix}.%(ext)s"
         if video:
             dl_opts["format"] = "best[ext=mp4]/best[ext=webm]/best"
@@ -312,9 +329,9 @@ def _soundcloud_search_and_download(query: str, video: bool):
 
 _JIOSAAVN_API_BASES = [
     "https://saavn.dev/api",
-    "https://jiosaavn-api-privatecvc2.vercel.app/api",
-    "https://jio-savaan-private.vercel.app/api",
-    "https://jiosaavn-api-2-harsh-py.vercel.app/api",
+    "https://jiosaavn-api-sigma.vercel.app/api",
+    "https://jiosaavn-api-ts.vercel.app/api",
+    "https://saavn.me/api",
 ]
 
 
@@ -445,9 +462,13 @@ def _youtube_search(query: str):
     if _COOKIE_FILE:
         search_strategies.append((_COOKIE_FILE, ["web_creator"], "cookies+web_creator"))
         search_strategies.append((_COOKIE_FILE, ["web"], "cookies+web"))
-        search_strategies.append((_COOKIE_FILE, ["mediaconnect"], "cookies+mediaconnect"))
-    search_strategies.append((None, ["mediaconnect"], "mediaconnect"))
+        search_strategies.append((_COOKIE_FILE, ["mweb"], "cookies+mweb"))
+        search_strategies.append((_COOKIE_FILE, ["tv"], "cookies+tv"))
+    # Cookieless strategies — prefer clients that don't need sign-in
+    search_strategies.append((None, ["tv_embedded"], "tv_embedded"))
+    search_strategies.append((None, ["web_embedded"], "web_embedded"))
     search_strategies.append((None, ["web_creator"], "web_creator"))
+    search_strategies.append((None, ["mediaconnect"], "mediaconnect"))
     search_strategies.append((None, ["tv"], "tv"))
     search_strategies.append((None, ["mweb"], "mweb"))
     search_strategies.append((None, None, "default"))
@@ -458,8 +479,13 @@ def _youtube_search(query: str):
             opts["extract_flat"] = True
             if cookie:
                 opts["cookiefile"] = cookie
+            # Merge player_client into extractor_args without overwriting po_token
             if player_client:
-                opts["extractor_args"] = {"youtube": {"player_client": player_client}}
+                ea = opts.get("extractor_args", {})
+                yt_args = dict(ea.get("youtube", {}))
+                yt_args["player_client"] = player_client
+                ea["youtube"] = yt_args
+                opts["extractor_args"] = ea
 
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(f"ytsearch5:{query}", download=False)
@@ -503,7 +529,7 @@ def _youtube_download(url: str, video: bool) -> str:
     else:
         fmt = (
             "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio[ext=opus]/"
-            "bestaudio[ext=webm]/bestaudio/best[height<=360]/best"
+            "bestaudio[ext=webm]/bestaudio/worst[ext=mp4]/worst/best"
         )
 
     # Build strategy list - cookies-based first if available
@@ -511,12 +537,14 @@ def _youtube_download(url: str, video: bool) -> str:
     if _COOKIE_FILE:
         strategies.append((_COOKIE_FILE, ["web_creator"], "cookies+web_creator"))
         strategies.append((_COOKIE_FILE, ["web"], "cookies+web"))
-        strategies.append((_COOKIE_FILE, ["ios"], "cookies+ios"))
         strategies.append((_COOKIE_FILE, ["mweb"], "cookies+mweb"))
+        strategies.append((_COOKIE_FILE, ["ios"], "cookies+ios"))
         strategies.append((_COOKIE_FILE, ["tv"], "cookies+tv"))
-        strategies.append((_COOKIE_FILE, ["mediaconnect"], "cookies+mediaconnect"))
-    strategies.append((None, ["mediaconnect"], "mediaconnect"))
+    # Cookieless strategies — prefer embedded/tv clients (less bot detection)
+    strategies.append((None, ["tv_embedded"], "tv_embedded"))
+    strategies.append((None, ["web_embedded"], "web_embedded"))
     strategies.append((None, ["web_creator"], "web_creator"))
+    strategies.append((None, ["mediaconnect"], "mediaconnect"))
     strategies.append((None, ["tv"], "tv"))
     strategies.append((None, ["mweb"], "mweb"))
     strategies.append((None, ["ios"], "ios"))
@@ -528,8 +556,13 @@ def _youtube_download(url: str, video: bool) -> str:
         opts["outtmpl"] = outtmpl
         if cookie:
             opts["cookiefile"] = cookie
+        # Merge player_client into extractor_args without overwriting po_token
         if player_client:
-            opts["extractor_args"] = {"youtube": {"player_client": player_client}}
+            ea = opts.get("extractor_args", {})
+            yt_args = dict(ea.get("youtube", {}))
+            yt_args["player_client"] = player_client
+            ea["youtube"] = yt_args
+            opts["extractor_args"] = ea
         opts["postprocessors"] = []
 
         try:
@@ -589,9 +622,9 @@ _PIPED_INSTANCES = [
     "https://pipedapi.kavin.rocks",
     "https://pipedapi.r4fo.com",
     "https://pipedapi.adminforge.de",
-    "https://api.piped.projectsegfau.lt",
-    "https://pipedapi.in.projectsegfau.lt",
-    "https://pipedapi.leptons.xyz",
+    "https://api.piped.privacydev.net",
+    "https://pipedapi.darkness.services",
+    "https://pipedapi.drgns.space",
 ]
 
 
@@ -731,13 +764,13 @@ def _piped_search_and_download(query: str, video: bool):
 
 _INVIDIOUS_INSTANCES = [
     "https://inv.nadeko.net",
-    "https://invidious.nerdvpn.de",
-    "https://iv.datura.network",
-    "https://invidious.private.coffee",
+    "https://invidious.privacyredirect.com",
+    "https://invidious.darkness.services",
+    "https://invidious.drgns.space",
     "https://yt.artemislena.eu",
-    "https://invidious.fdn.fr",
     "https://inv.tux.pizza",
     "https://invidious.protokoll-11.de",
+    "https://iv.nbooster.com",
 ]
 
 def _invidious_search_and_download(query: str, video: bool):
@@ -894,6 +927,9 @@ def _generic_ytdlp_download(url: str, video: bool):
 
     suffix = "_v" if video else ""
     opts = _base_opts()
+    # Remove YouTube-specific po_token for generic URLs (keep it only for youtube.com)
+    if not re.match(r'https?://(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)/', url):
+        opts.pop("extractor_args", None)
     opts["format"] = fmt
     opts["outtmpl"] = f"downloads/gen_%(id)s{suffix}.%(ext)s"
     if _COOKIE_FILE:
@@ -997,11 +1033,11 @@ def _is_streaming_url(url: str) -> str:
 def search_and_get_media(query: str, video: bool):
     """
     Multi-source search with robust fallback chain:
-      1. YouTube search + download audio (yt-dlp — audio first)
-      2. YouTube search + download video (yt-dlp — video fallback)
-      3. YouTube combined search+download (yt-dlp — original path)
-      4. SoundCloud (yt-dlp — great for remixes, indie tracks)
-      5. JioSaavn (free API — best for Hindi/Bengali/Indian songs)
+      1. SoundCloud (yt-dlp — great for remixes, indie tracks, most reliable)
+      2. JioSaavn (free API — best for Hindi/Bengali/Indian songs)
+      3. YouTube search + download audio (yt-dlp — audio first)
+      4. YouTube search + download video (yt-dlp — video fallback)
+      5. YouTube combined search+download (yt-dlp — original path)
       6. Piped (YouTube alternative frontend, no cookies)
       7. Invidious (another YouTube alt frontend)
       8. Query variations on JioSaavn
@@ -1012,40 +1048,8 @@ def search_and_get_media(query: str, video: bool):
     if random.random() < 0.3:
         cleanup_downloads()
 
-    # === Source 1: YouTube search + download audio ===
-    LOGGER.info("=== Source 1: YouTube (audio) ===")
-    try:
-        path, info = _youtube_search_and_download(query, video=False)
-        if path and info:
-            return path, info
-        errors.append("YouTube audio: search or download failed")
-    except Exception as e:
-        errors.append(f"YT-audio: {str(e)[:50]}")
-
-    # === Source 2: YouTube search + download video ===
-    LOGGER.info("=== Source 2: YouTube (video) ===")
-    try:
-        path, info = _youtube_search_and_download(query, video=True)
-        if path and info:
-            return path, info
-        errors.append("YouTube video: search or download failed")
-    except Exception as e:
-        errors.append(f"YT-video: {str(e)[:50]}")
-
-    # === Source 3: YouTube combined (original caller preference) ===
-    if video:
-        # Only retry with caller's original preference if different from above
-        LOGGER.info("=== Source 3: YouTube (combined, caller pref) ===")
-        try:
-            path, info = _youtube_search_and_download(query, video)
-            if path and info:
-                return path, info
-            errors.append("YouTube combined: failed")
-        except Exception as e:
-            errors.append(f"YT-combined: {str(e)[:50]}")
-
-    # === Source 4: SoundCloud ===
-    LOGGER.info("=== Source 4: SoundCloud ===")
+    # === Source 1: SoundCloud (most reliable — no bot detection) ===
+    LOGGER.info("=== Source 1: SoundCloud ===")
     try:
         path, info = _soundcloud_search_and_download(query, video)
         if path and info:
@@ -1054,8 +1058,8 @@ def search_and_get_media(query: str, video: bool):
     except Exception as e:
         errors.append(f"SC: {str(e)[:50]}")
 
-    # === Source 5: JioSaavn ===
-    LOGGER.info("=== Source 5: JioSaavn ===")
+    # === Source 2: JioSaavn ===
+    LOGGER.info("=== Source 2: JioSaavn ===")
     try:
         path, info = _jiosaavn_search_and_download(query, video)
         if path and info:
@@ -1063,6 +1067,37 @@ def search_and_get_media(query: str, video: bool):
         errors.append("JioSaavn: no results")
     except Exception as e:
         errors.append(f"JS: {str(e)[:50]}")
+
+    # === Source 3: YouTube search + download audio ===
+    LOGGER.info("=== Source 3: YouTube (audio) ===")
+    try:
+        path, info = _youtube_search_and_download(query, video=False)
+        if path and info:
+            return path, info
+        errors.append("YouTube audio: search or download failed")
+    except Exception as e:
+        errors.append(f"YT-audio: {str(e)[:50]}")
+
+    # === Source 4: YouTube search + download video ===
+    LOGGER.info("=== Source 4: YouTube (video) ===")
+    try:
+        path, info = _youtube_search_and_download(query, video=True)
+        if path and info:
+            return path, info
+        errors.append("YouTube video: search or download failed")
+    except Exception as e:
+        errors.append(f"YT-video: {str(e)[:50]}")
+
+    # === Source 5: YouTube combined (original caller preference) ===
+    if video:
+        LOGGER.info("=== Source 5: YouTube (combined, caller pref) ===")
+        try:
+            path, info = _youtube_search_and_download(query, video)
+            if path and info:
+                return path, info
+            errors.append("YouTube combined: failed")
+        except Exception as e:
+            errors.append(f"YT-combined: {str(e)[:50]}")
 
     # === Source 6: Piped (YouTube alt frontend) ===
     LOGGER.info("=== Source 6: Piped ===")

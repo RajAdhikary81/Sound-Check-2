@@ -2,7 +2,7 @@ pyrofork==2.3.69
 py-tgcalls==2.2.12
 ntgcalls==2.2.1b3
 tgcrypto
-yt-dlp>=2025.1.15
+yt-dlp>=2025.5.22
 httpx<0.28
 motor
 dnspython
