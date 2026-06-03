@@ -997,12 +997,14 @@ def _is_streaming_url(url: str) -> str:
 def search_and_get_media(query: str, video: bool):
     """
     Multi-source search with robust fallback chain:
-      1. YouTube combined search+download (yt-dlp — fastest path)
-      2. SoundCloud (yt-dlp — great for remixes, indie tracks)
-      3. JioSaavn (free API — best for Hindi/Bengali/Indian songs)
-      4. Piped (YouTube alternative frontend, no cookies)
-      5. Invidious (another YouTube alt frontend)
-      6. Query variations on JioSaavn
+      1. YouTube search + download audio (yt-dlp — audio first)
+      2. YouTube search + download video (yt-dlp — video fallback)
+      3. YouTube combined search+download (yt-dlp — original path)
+      4. SoundCloud (yt-dlp — great for remixes, indie tracks)
+      5. JioSaavn (free API — best for Hindi/Bengali/Indian songs)
+      6. Piped (YouTube alternative frontend, no cookies)
+      7. Invidious (another YouTube alt frontend)
+      8. Query variations on JioSaavn
     """
     errors = []
 
@@ -1010,18 +1012,40 @@ def search_and_get_media(query: str, video: bool):
     if random.random() < 0.3:
         cleanup_downloads()
 
-    # === Source 1: YouTube combined search+download ===
-    LOGGER.info("=== Source 1: YouTube (combined) ===")
+    # === Source 1: YouTube search + download audio ===
+    LOGGER.info("=== Source 1: YouTube (audio) ===")
     try:
-        path, info = _youtube_search_and_download(query, video)
+        path, info = _youtube_search_and_download(query, video=False)
         if path and info:
             return path, info
-        errors.append("YouTube: search or download failed")
+        errors.append("YouTube audio: search or download failed")
     except Exception as e:
-        errors.append(f"YT: {str(e)[:50]}")
+        errors.append(f"YT-audio: {str(e)[:50]}")
 
-    # === Source 2: SoundCloud ===
-    LOGGER.info("=== Source 2: SoundCloud ===")
+    # === Source 2: YouTube search + download video ===
+    LOGGER.info("=== Source 2: YouTube (video) ===")
+    try:
+        path, info = _youtube_search_and_download(query, video=True)
+        if path and info:
+            return path, info
+        errors.append("YouTube video: search or download failed")
+    except Exception as e:
+        errors.append(f"YT-video: {str(e)[:50]}")
+
+    # === Source 3: YouTube combined (original caller preference) ===
+    if video:
+        # Only retry with caller's original preference if different from above
+        LOGGER.info("=== Source 3: YouTube (combined, caller pref) ===")
+        try:
+            path, info = _youtube_search_and_download(query, video)
+            if path and info:
+                return path, info
+            errors.append("YouTube combined: failed")
+        except Exception as e:
+            errors.append(f"YT-combined: {str(e)[:50]}")
+
+    # === Source 4: SoundCloud ===
+    LOGGER.info("=== Source 4: SoundCloud ===")
     try:
         path, info = _soundcloud_search_and_download(query, video)
         if path and info:
@@ -1030,8 +1054,8 @@ def search_and_get_media(query: str, video: bool):
     except Exception as e:
         errors.append(f"SC: {str(e)[:50]}")
 
-    # === Source 3: JioSaavn ===
-    LOGGER.info("=== Source 3: JioSaavn ===")
+    # === Source 5: JioSaavn ===
+    LOGGER.info("=== Source 5: JioSaavn ===")
     try:
         path, info = _jiosaavn_search_and_download(query, video)
         if path and info:
@@ -1040,8 +1064,8 @@ def search_and_get_media(query: str, video: bool):
     except Exception as e:
         errors.append(f"JS: {str(e)[:50]}")
 
-    # === Source 4: Piped (YouTube alt frontend) ===
-    LOGGER.info("=== Source 4: Piped ===")
+    # === Source 6: Piped (YouTube alt frontend) ===
+    LOGGER.info("=== Source 6: Piped ===")
     try:
         path, info = _piped_search_and_download(query, video)
         if path and info:
@@ -1050,8 +1074,8 @@ def search_and_get_media(query: str, video: bool):
     except Exception as e:
         errors.append(f"Pip: {str(e)[:50]}")
 
-    # === Source 5: Invidious ===
-    LOGGER.info("=== Source 5: Invidious ===")
+    # === Source 7: Invidious ===
+    LOGGER.info("=== Source 7: Invidious ===")
     try:
         path, info = _invidious_search_and_download(query, video)
         if path and info:
@@ -1060,8 +1084,8 @@ def search_and_get_media(query: str, video: bool):
     except Exception as e:
         errors.append(f"Inv: {str(e)[:50]}")
 
-    # === Source 6: Query variations on JioSaavn ===
-    LOGGER.info("=== Source 6: Query variations ===")
+    # === Source 8: Query variations on JioSaavn ===
+    LOGGER.info("=== Source 8: Query variations ===")
     variations = []
     q_lower = query.lower()
     if "official" not in q_lower:
